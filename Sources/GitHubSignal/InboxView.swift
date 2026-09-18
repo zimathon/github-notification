@@ -316,7 +316,17 @@ struct InboxView: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("通知設定").font(.headline)
+            HStack {
+                Text("設定").font(.headline)
+                Spacer()
+                Text("v" + model.appVersion).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("起動元").foregroundStyle(.secondary)
+                Text(Bundle.main.bundleURL.path)
+                    .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                    .help(Bundle.main.bundleURL.path)
+            }.font(.system(size: 12))
             HStack {
                 Text("背景の透過率")
                 Slider(value: $backgroundTransparency, in: 0...0.6, step: 0.01)

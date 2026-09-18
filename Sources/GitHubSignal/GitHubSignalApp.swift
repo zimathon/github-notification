@@ -88,7 +88,7 @@ private struct SignalMenu: View {
         if let status = model.updateStatus { Text(status) }
         Button("終了") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
         // The menu remains mounted when the inbox window is closed.
-        Text("GitHub Signal").hidden()
+        Text("GitHub Signal v" + model.appVersion)
             .onReceive(NotificationCenter.default.publisher(for: .showSignalInbox)) { _ in showInbox() }
     }
     private func showInbox() {
