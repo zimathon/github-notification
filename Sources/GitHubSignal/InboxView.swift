@@ -6,6 +6,7 @@ struct InboxView: View {
     @ObservedObject var model: AppModel
     @AppStorage("backgroundTransparency") private var backgroundTransparency = 0.18
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
     @State private var filter = "すべて"
     @State private var search = ""
     @State private var settingsOpen = false
@@ -91,7 +92,7 @@ struct InboxView: View {
             footer
         }
         .frame(minWidth: 380, minHeight: 280)
-        .background(InboxMaterial())
+        .background(InboxBackground())
         .tint(accent)
         .sheet(isPresented: $settingsOpen) { settings }
     }
@@ -158,6 +159,10 @@ struct InboxView: View {
                     ForEach(SignalKind.allCases, id: \.self) { kind in Text(kind.title).tag(kind.title) }
                 }.labelsHidden().frame(width: 105)
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
+                // These controls are AppKit views. They keep the appearance they
+                // were built with, so a light/dark switch alone leaves them stale
+                // until something else rebuilds them. Rebuild them on the switch.
+                .id(colorScheme)
             HStack(spacing: 6) {
                 Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
                 if !organization.isEmpty || !repository.isEmpty || filter != "すべて" {
@@ -169,6 +174,7 @@ struct InboxView: View {
                 Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox)
                 TextField("検索", text: $search).textFieldStyle(.roundedBorder).frame(width: 110)
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
+                .id(colorScheme)
             if visible.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: model.syncing ? "arrow.triangle.2.circlepath" : "checkmark.circle")
@@ -394,9 +400,29 @@ struct InboxView: View {
 }
 
 // Native vibrancy follows macOS appearance and accessibility settings.
-private struct InboxMaterial: NSViewRepresentable {
+// The transparency setting is expressed by how much of an opaque window-colored
+// cover is drawn over the material, because the material cannot be dimmed:
+// `.behindWindow` blending punches a hole through the window at the window-server
+// level, so neither the view's alphaValue nor an opaque window background closes
+// it. Only content drawn above the material does.
+private struct InboxBackground: View {
     @AppStorage("backgroundTransparency") private var backgroundTransparency = 0.18
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    // The slider maximum. This value counts as 100% transparency.
+    static let maxTransparency = 0.6
+
+    var body: some View {
+        let transparency = reduceTransparency ? 0 : min(Self.maxTransparency, max(0, backgroundTransparency))
+        // Fully covered at 0%, fully uncovered at the maximum, linear in between
+        // so the first step off zero does not jump.
+        let cover = 1 - transparency / Self.maxTransparency
+        InboxMaterial()
+            .overlay(Color(nsColor: .windowBackgroundColor).opacity(cover))
+    }
+}
+
+private struct InboxMaterial: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = MaterialView()
         view.material = .hudWindow
@@ -405,9 +431,7 @@ private struct InboxMaterial: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.alphaValue = reduceTransparency ? 1 : 1 - min(0.6, max(0, backgroundTransparency))
-    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 
     private final class MaterialView: NSVisualEffectView {
         override func viewDidMoveToWindow() {
