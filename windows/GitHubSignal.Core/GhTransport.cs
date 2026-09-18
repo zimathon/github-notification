@@ -30,7 +30,7 @@ public sealed class GhTransport : IGitHubTransport
             throw new InvalidDataException("APIの接続先が正しくありません。");
         var start = new ProcessStartInfo(FindExecutable()) {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
-            RedirectStandardError = true, RedirectStandardInput = true,
+            RedirectStandardError = true, RedirectStandardInput = true, StandardOutputEncoding = Encoding.UTF8,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
         };
         foreach (var value in new[] { "api", "--hostname", "github.com", "--method", "GET", "--include",

@@ -28,7 +28,7 @@ gh auth login --hostname github.com --web
 
 Windows版のデータは`%LOCALAPPDATA%\GitHubSignal\inbox.json`に保存する。認証トークンは保存しない。Mac版とのファイル共有には対応しない。GitHub CLIは`%ProgramFiles%\GitHub CLI\gh.exe`または`%LOCALAPPDATA%\Programs\GitHub CLI\gh.exe`を使う。`GH_TOKEN`や独自の`GH_CONFIG_DIR`は使用しない。
 
-Mac版の透過設定・投稿者画像・ログイン時の自動起動はWindows初版の対象外。通知バナーの表示と実アカウントの接続は利用するWindows PCで確認する必要がある。
+Windows初版は、透過設定・投稿者画像・ログイン時の自動起動には未対応。通知バナーの表示と実アカウントの接続は利用するWindows PCで確認する必要がある。
 
 ### Windows版をビルドする
 

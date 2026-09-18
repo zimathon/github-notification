@@ -159,11 +159,21 @@ public partial class MainWindow : Window
         bitmap.Render(this);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using (var output = File.Create(Path.Combine(AppContext.BaseDirectory, "smoke-window.png"))) encoder.Save(output);
+        var details = Descendants(this).OfType<Expander>().Single();
+        details.IsExpanded = true; UpdateLayout();
+        if (!Descendants(this).OfType<Button>().Any(x => Equals(x.Content, "コメントを開く")))
+            throw new InvalidOperationException("Individual notification template was not rendered");
+        CheckSettingsSmoke();
         SearchBox.Text = "nothing-matches";
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Search filter failed");
         SearchBox.Text = "";
         engine.Mutate(x => x.AcknowledgeThread(x.Signals[0].ThreadKey));
         if (VisibleThreadCount != 0 || engine.PendingCount != 0) throw new InvalidOperationException("PR acknowledgement failed");
+    }
+    private void CheckSettingsSmoke()
+    {
+        var settings = new SettingsWindow(engine.State.Settings, Version, true) { Owner = this };
+        settings.Show(); settings.UpdateLayout(); settings.Close();
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {
