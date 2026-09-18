@@ -215,6 +215,9 @@ struct InboxView: View {
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.plain).help("GitHubで開く")
                         .accessibilityLabel("\(latest.title)をGitHubで開く")
+                        .contextMenu {
+                            Button("URLをコピー") { model.copyURL(latest) }
+                        }
                     HStack {
                         if !expanded {
                             ActorAvatar(actor: latest.actor)
@@ -228,6 +231,9 @@ struct InboxView: View {
                         Spacer()
                         HStack(spacing: 6) {
                             Button("GitHubで開く") { model.open(latest) }
+                            Button { model.copyURL(latest) } label: {
+                                Image(systemName: "doc.on.doc")
+                            }.help("URLをコピー").accessibilityLabel("URLをコピー")
                             if !showAcknowledged {
                                 Button("確認済み") { model.acknowledgeThread(group.id) }
                                     .help("このPR・Issueの通知をすべて確認済みにする")
@@ -260,6 +266,7 @@ struct InboxView: View {
                     Image(systemName: "arrow.up.right.square")
                 }.buttonStyle(.borderless).help("GitHubで開く").accessibilityLabel("GitHubで開く")
                 Menu {
+                    Button("URLをコピー") { model.copyURL(signal) }
                     if !signal.acknowledged {
                         Button("確認済みにする") { model.acknowledge(signal.id) }
                         Button(snoozed ? "スヌーズ解除" : "1時間後に通知") {

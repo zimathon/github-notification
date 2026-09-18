@@ -239,6 +239,12 @@ final class AppModel: ObservableObject {
         if let url = SignalRules.safeWebURL(signal.url) { NSWorkspace.shared.open(url) }
     }
 
+    func copyURL(_ signal: Signal) {
+        guard let url = SignalRules.safeWebURL(signal.url) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+    }
+
     func testNotification() async {
         await requestPermission()
         guard permissionGranted else { return }
