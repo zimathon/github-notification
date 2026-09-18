@@ -1,14 +1,52 @@
 # GitHub Signal
 
-自分宛てのメンション・レビュー依頼と、自分のPRへのコメント・レビューを知らせるMacアプリ。ウィンドウを閉じてもメニューバーで動き続け、通知は「確認済み」にするまで一覧に残る。
+自分宛てのメンション・レビュー依頼と、自分のPRへのコメント・レビューを知らせるMac・Windowsアプリ。ウィンドウを閉じてもメニューバー／タスクトレイで動き続け、通知は「確認済み」にするまで一覧に残る。
 
-SwiftUIとmacOS標準ライブラリだけで実装している。WebView、常駐サーバー、追加のSwiftパッケージ依存はない。GitHubとの通信時だけGitHub CLI（`gh`）を起動し、通常は2分間隔で更新を確認する。変更のないスレッドの詳細は再取得しない。
+Mac版はSwiftUI、Windows版はC#＋WPFで個別に実装している。Windows版もOS標準のトレイ通知を使い、WebViewは使用しない。
+
+Mac版はSwiftUIとmacOS標準ライブラリだけで実装している。WebView、常駐サーバー、追加のSwiftパッケージ依存はない。GitHubとの通信時だけGitHub CLI（`gh`）を起動し、通常は2分間隔で更新を確認する。変更のないスレッドの詳細は再取得しない。
 
 一覧は同じPR・Issueを1件にまとめ、開くと個別のコメントやレビューを確認できる。メニューバーにもPR・Issue単位の未確認件数を常時表示する。スヌーズ中も件数に含め、0件のときも「0」を表示する。
 
-## Releasesからダウンロードする
+## Windows版
 
-[最新版のダウンロード](https://github.com/zimathon/github-notification/releases/latest)からZIPを取得し、展開した`GitHub Signal.app`をアプリケーションフォルダへ移動して起動する。
+[Releases](https://github.com/zimathon/github-notification/releases/latest)から`GitHubSignal-<version>-windows-x64.zip`をダウンロードし、ZIP全体を展開して`GitHubSignal.exe`を起動する。Windows 11 x64向けで、.NETランタイムを同梱しているため.NETの事前インストールは不要。コード署名は行っていない。
+
+接続前にPowerShellで次を実行する。
+
+```powershell
+winget install --id GitHub.cli -e
+gh auth login --hostname github.com --web
+```
+
+- アプリの「開始」で取得を始める。閉じるボタンでは終了せず、タスクトレイに常駐する。「終了」で停止する。
+- 同じPR・Issueを1行にまとめ、トレイに未確認件数を表示する。0件ならGitHubアイコン、100件以上なら`99+`になる。
+- 組織・リポジトリ・種類の表示フィルタ、検索、GitHubを開く、URLコピー、PR単位の確認済み・1時間のスヌーズに対応する。
+- 設定で通知対象の組織、取得間隔、再通知間隔、Bot通知を変更できる。表示フィルタは通知対象に影響しない。
+- Windowsのトレイ通知はまとめて1つ表示し、クリックで一覧を開く。OSの通知設定や応答不可モードで抑制される場合がある。「テスト通知を送る」で確認できる。
+- 新版の確認は起動時と、その後ウィンドウを開いた際に前回から24時間以上経過していれば行う。Windows用ZIPがある新版だけを案内し、ダウンロードページを開く。差し替えは手動で行う。
+
+Windows版のデータは`%LOCALAPPDATA%\GitHubSignal\inbox.json`に保存する。認証トークンは保存しない。Mac版とのファイル共有には対応しない。GitHub CLIは`%ProgramFiles%\GitHub CLI\gh.exe`または`%LOCALAPPDATA%\Programs\GitHub CLI\gh.exe`を使う。`GH_TOKEN`や独自の`GH_CONFIG_DIR`は使用しない。
+
+Mac版の透過設定・投稿者画像・ログイン時の自動起動はWindows初版の対象外。通知バナーの表示と実アカウントの接続は利用するWindows PCで確認する必要がある。
+
+### Windows版をビルドする
+
+.NET 10 SDKを使用する。アプリのビルド・起動にはWindowsを使う。CoreのテストはMacでも実行できる。
+
+```powershell
+dotnet run --project windows/GitHubSignal.Tests -c Release
+./scripts/package-windows.ps1
+./dist/windows-x64/GitHubSignal.exe --demo
+```
+
+GitHub Actionsの`Windows`ワークフローでもCoreの回帰テスト、WPFのビルド・画面生成テスト、配布ZIPの作成を行う。通知判定の一部はMac版と同じJSONテストデータで検証する。デモでは通信・OS通知を行わず、操作による保存は一時フォルダーに限定する。
+
+以下はMac版の使い方。
+
+## Mac版をReleasesからダウンロードする
+
+[最新版のダウンロード](https://github.com/zimathon/github-notification/releases/latest)から`*-macos-arm64.zip`を取得し、展開した`GitHub Signal.app`をアプリケーションフォルダへ移動して起動する。
 
 配布版はApple Silicon搭載Mac向けで、macOS 13以降が必要。GitHubへの接続には、別途GitHub CLI（`gh`）をインストールしてログインしておく。
 

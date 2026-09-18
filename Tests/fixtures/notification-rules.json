@@ -1,0 +1,20 @@
+{
+  "mentions": [
+    {"body":"確認 @ZiMaThOn お願い", "login":"zimathon", "expected":true},
+    {"body":"(@zimathon)", "login":"zimathon", "expected":true},
+    {"body":"mail@zimathon", "login":"zimathon", "expected":false},
+    {"body":"@@zimathon", "login":"zimathon", "expected":false},
+    {"body":"@zimathon-dev", "login":"zimathon", "expected":false},
+    {"body":"@zimathon_dev", "login":"zimathon", "expected":false},
+    {"body":"@zimathon/team", "login":"zimathon", "expected":false},
+    {"body":"LGTM", "login":"zimathon", "expected":false}
+  ],
+  "classification": [
+    {"body":"@zimathon", "actor":"ZIMATHON", "ownPR":true, "review":false, "expected":null},
+    {"body":"LGTM", "actor":"other", "ownPR":false, "review":true, "expected":null},
+    {"body":"LGTM", "actor":"other", "ownPR":true, "review":true, "expected":"review"},
+    {"body":"確認しました", "actor":"other", "ownPR":true, "review":false, "expected":"comment"},
+    {"body":"@zimathon", "actor":"other", "ownPR":true, "review":true, "expected":"mention"},
+    {"body":"@zimathon", "actor":"other", "ownPR":false, "review":false, "expected":"mention"}
+  ]
+}

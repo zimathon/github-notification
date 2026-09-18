@@ -1,0 +1,48 @@
+name: Windows
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', 'Tests/fixtures/**', 'scripts/package-windows.ps1', '.github/workflows/windows.yml']
+  pull_request:
+    paths: ['windows/**', 'Tests/fixtures/**', 'scripts/package-windows.ps1', '.github/workflows/windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Core regression tests
+        run: dotnet run --project windows/GitHubSignal.Tests -c Release
+      - name: Package self-contained app
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - name: WPF startup and rendered notification smoke test
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/windows-x64/GitHubSignal.exe" -ArgumentList "--smoke-test" -PassThru
+          if (-not $process.WaitForExit(30000)) { $process.Kill(); throw "WPF smoke test timed out" }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path "dist/windows-x64/smoke-error.txt") { Get-Content "dist/windows-x64/smoke-error.txt" }
+            throw "WPF smoke test failed: $($process.ExitCode)"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GitHubSignal-windows-x64
+          path: |
+            dist/*-windows-x64.zip
+            dist/*-windows-x64.zip.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-smoke-diagnostics
+          path: |
+            dist/windows-x64/smoke-window.png
+            dist/windows-x64/smoke-error.txt
+          if-no-files-found: ignore
