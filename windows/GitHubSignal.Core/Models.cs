@@ -21,7 +21,7 @@ public sealed record Signal
     public DateTimeOffset? SnoozedUntil { get; set; }
     public DateTimeOffset? LastNotifiedAt { get; set; }
     [JsonIgnore] public bool IsApproval => Regex.IsMatch(Id, @"^review:[0-9]+:APPROVED$", RegexOptions.CultureInvariant);
-    [JsonIgnore] public string KindLabel => IsApproval ? "Approve" : Rules.Label(Kind);
+    [JsonIgnore] public string KindLabel => IsApproval ? "PRが承認された" : Rules.Label(Kind);
     [JsonIgnore] public string Preview => Rules.Preview(Excerpt);
     [JsonIgnore] public string ActorLabel => "@" + Actor;
     [JsonIgnore] public string TimeLabel => Date.ToLocalTime().ToString("MM/dd HH:mm");

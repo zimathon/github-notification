@@ -31,7 +31,7 @@ public struct Signal: Codable, Identifiable, Equatable {
         id.range(of: #"^review:[0-9]+:APPROVED$"#, options: .regularExpression) != nil
     }
 
-    public var kindLabel: String { isApproval ? "Approve" : kind.title }
+    public var kindLabel: String { isApproval ? "PRが承認された" : kind.title }
 
     public var threadKey: String {
         guard var components = URLComponents(string: url) else { return repository + ":" + url }

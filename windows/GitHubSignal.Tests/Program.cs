@@ -23,11 +23,11 @@ Test("Shared Mac/Windows mention and classification fixtures", () => {
 Test("Approval label uses persisted state and preserves classification", () => {
     var approval = Signal("review:123:APPROVED") with { Kind = SignalKind.Review };
     var restored = Json.Read<Signal>(JsonSerializer.Serialize(approval, Json.Options));
-    Equal("Approve", restored.KindLabel); Equal(SignalKind.Review, restored.Kind);
+    Equal("PRが承認された", restored.KindLabel); Equal(SignalKind.Review, restored.Kind);
     var mention = approval with { Kind = SignalKind.Mention };
-    Equal("Approve", mention.KindLabel); Equal(SignalKind.Mention, mention.Kind);
+    Equal("PRが承認された", mention.KindLabel); Equal(SignalKind.Mention, mention.Kind);
     foreach (var id in new[] { "review:123:COMMENTED", "review:123:CHANGES_REQUESTED", "review:123:DISMISSED", "comment:123:APPROVED", "request:123", "review::APPROVED" }) {
-        var other = Signal(id) with { Kind = SignalKind.Review, Excerpt = "Approve" };
+        var other = Signal(id) with { Kind = SignalKind.Review, Excerpt = "PRが承認された" };
         Equal(false, other.IsApproval); Equal(Rules.Label(SignalKind.Review), other.KindLabel);
     }
 });

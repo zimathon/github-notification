@@ -299,7 +299,7 @@ struct InboxView: View {
     }
 
     private func shortLabel(_ signal: Signal) -> String {
-        if signal.isApproval { return "Approve" }
+        if signal.isApproval { return "PRが承認された" }
         switch signal.kind {
         case .mention: return "メンション"
         case .reviewRequest: return "レビュー依頼"
