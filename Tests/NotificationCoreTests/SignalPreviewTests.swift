@@ -54,6 +54,18 @@ final class SignalPreviewTests: XCTestCase {
         XCTAssertFalse(state.signals[2].acknowledged)
     }
 
+    func testBulkAcknowledgementOnlyTouchesSelectedThreadsAndKeepsHistory() {
+        let first = Signal(id: "one", kind: .comment, repository: "org/repo", title: "PR", actor: "other", excerpt: "", url: "https://github.com/org/repo/pull/1#one", date: Date())
+        var old = first; old.id = "old"; old.date = .distantPast
+        var hidden = first; hidden.id = "hidden"; hidden.url = "https://github.com/org/repo/pull/2"
+        var state = InboxState(); state.signals = [first, old, hidden]
+        XCTAssertEqual(state.acknowledgeThreads([first.threadKey]), ["one", "old"])
+        XCTAssertTrue(state.signals[1].acknowledged)
+        XCTAssertFalse(state.signals[2].acknowledged)
+        XCTAssertEqual(state.signals.count, 3)
+        XCTAssertTrue(state.acknowledgeThreads([first.threadKey]).isEmpty)
+    }
+
     func testGroupsCommentsReviewsAndFileLinksByPRNotTitle() {
         func signal(_ url: String) -> Signal {
             Signal(id: url, kind: .comment, repository: "org/repo", title: "Same title", actor: "other", excerpt: "body", url: url, date: Date())

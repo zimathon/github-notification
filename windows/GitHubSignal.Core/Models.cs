@@ -50,6 +50,7 @@ public sealed class Settings
     public List<string> Organizations { get; set; } = [];
     public string ViewOrganization { get; set; } = "";
     public string ViewRepository { get; set; } = "";
+    public int ViewDays { get; set; }
     public bool Includes(string repository) => Organizations.Count == 0 ||
         Organizations.Contains(repository.Split('/')[0], StringComparer.OrdinalIgnoreCase);
     public static List<string> ParseOrganizations(string input)
@@ -76,8 +77,15 @@ public sealed class InboxState
     [JsonRequired] public List<Signal> Signals { get; set; } = [];
     public Dictionary<string, PendingThread> Pending { get; set; } = [];
     public Dictionary<string, DateTimeOffset> Processed { get; set; } = [];
+    public string? LastNotifiedRelease { get; set; }
+    public Dictionary<string, PullRequestInfo> PullRequests { get; set; } = [];
     public HashSet<string> AcknowledgedBodyIds { get; set; } = [];
     [JsonRequired] public Settings Settings { get; set; } = new();
+    public void Merge(SignalBatch batch)
+    {
+        Merge(batch.Signals);
+        if (batch.ThreadKey is { } key && batch.PullRequest is { Status: not null } info) PullRequests[key] = info;
+    }
     public void Merge(IEnumerable<Signal> incoming)
     {
         var ids = Signals.Select(x => x.Id).ToHashSet();
@@ -104,11 +112,18 @@ public sealed class InboxState
     {
         foreach (var signal in Signals.Where(x => x.ThreadKey == key)) signal.Acknowledged = true;
     }
+    public void AcknowledgeThreads(IEnumerable<string> keys)
+    {
+        var selected = keys.ToHashSet();
+        foreach (var signal in Signals.Where(x => selected.Contains(x.ThreadKey))) signal.Acknowledged = true;
+    }
     public void Prune(DateTimeOffset cutoff)
     {
         foreach (var signal in Signals.Where(x => x.Acknowledged && x.Id.StartsWith("body:", StringComparison.Ordinal)))
             AcknowledgedBodyIds.Add(signal.Id);
         Signals.RemoveAll(x => x.Acknowledged && x.Date < cutoff);
+        var retained = Signals.Select(x => x.ThreadKey).ToHashSet();
+        foreach (var key in PullRequests.Keys.Where(x => !retained.Contains(x)).ToArray()) PullRequests.Remove(key);
         foreach (var key in Processed.Where(x => x.Value < cutoff).Select(x => x.Key).ToArray()) Processed.Remove(key);
     }
 }

@@ -19,10 +19,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var updateStatus: String?
     let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     private var updateLoop: Task<Void, Never>?
+    private var nextUpdateCheck = Date.distantPast
     private let store: StateStore
     private let client = GitHubClient(transport: GHTransport())
     private var loop: Task<Void, Never>?
     private var permissionGranted = false
+    private var pullRequestAttempts: [String: Date] = [:]
     private var serverPollInterval: TimeInterval = 60
 
     var filteredSignals: [Signal] { state.signals.filter { state.settings.includes(repository: $0.repository) } }
@@ -60,7 +62,7 @@ final class AppModel: ObservableObject {
             updateLoop = Task { [weak self] in
                 while !Task.isCancelled {
                     await self?.checkForUpdates()
-                    try? await Task.sleep(nanoseconds: 86_400_000_000_000)
+                    try? await Task.sleep(nanoseconds: 60_000_000_000)
                 }
             }
         }
@@ -79,7 +81,8 @@ final class AppModel: ObservableObject {
     }
 
     func checkForUpdates(manual: Bool = false) async {
-        guard !demo, !checkingUpdate else { return }
+        guard !demo, !checkingUpdate, manual || Date() >= nextUpdateCheck else { return }
+        nextUpdateCheck = Date().addingTimeInterval(86_400)
         checkingUpdate = true
         defer { checkingUpdate = false }
         if manual { updateStatus = nil }
@@ -88,7 +91,21 @@ final class AppModel: ObservableObject {
             guard !demo else { return }
             availableRelease = release.isNewer(than: appVersion) ? release.tag_name : nil
             updateStatus = availableRelease == nil ? "最新版を使用しています" : nil
+            if ready, release.shouldNotify(installed: appVersion, lastNotified: state.lastNotifiedRelease) {
+                await refreshPermission()
+                guard !demo, ready, permissionGranted else { return }
+                let content = UNMutableNotificationContent()
+                content.title = "GitHub Signalの新しいバージョン"
+                content.body = "\(release.tag_name) が公開されました。クリックするとダウンロードページを開きます。"
+                content.sound = .default
+                content.userInfo = ["appUpdate": true]
+                try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "app-update", content: content, trigger: nil))
+                guard !demo else { return }
+                state.lastNotifiedRelease = release.tag_name
+                persist()
+            }
         } catch {
+            nextUpdateCheck = Date().addingTimeInterval(3_600)
             if manual, !demo { updateStatus = "更新を確認できませんでした。時間をおいて再試行してください。" }
         }
     }
@@ -144,7 +161,7 @@ final class AppModel: ObservableObject {
             for pending in work {
                 guard state.enabled, ready else { return }
                 do {
-                    let signals = try await client.signals(for: pending, login: identity.login)
+                    let signals = try await client.details(for: pending, login: identity.login)
                     state.merge(signals)
                     state.processed[pending.thread.id] = pending.thread.updatedAt
                     state.pending.removeValue(forKey: pending.thread.id)
@@ -155,6 +172,7 @@ final class AppModel: ObservableObject {
                     if failures.count >= 3 { break }
                 }
             }
+            await refreshPullRequests()
             if state.pending.isEmpty {
                 lastSync = Date()
             } else {
@@ -172,6 +190,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func refreshPullRequests() async {
+        let now = Date()
+        let grouped = Dictionary(grouping: pending.filter { PullRequestInfo.apiPath(for: $0) != nil }, by: \.threadKey)
+        func lastAttempt(_ key: String) -> Date {
+            max(pullRequestAttempts[key] ?? .distantPast, state.pullRequests[key]?.checkedAt ?? .distantPast)
+        }
+        let keys = grouped.keys.filter { now.timeIntervalSince(lastAttempt($0)) >= 900 || lastAttempt($0) > now }
+            .sorted { lastAttempt($0) == lastAttempt($1) ? (grouped[$0]?.first?.date ?? .distantPast) > (grouped[$1]?.first?.date ?? .distantPast) : lastAttempt($0) < lastAttempt($1) }
+        for key in keys.prefix(3) {
+            guard ready, state.enabled, !demo, let signal = grouped[key]?.first else { return }
+            pullRequestAttempts[key] = now
+            do {
+                let info = try await client.pullRequest(for: signal)
+                guard ready, state.enabled, !demo else { return }
+                state.pullRequests[key] = info
+            } catch { break } // Keep the last known status; retry other PRs on later polling runs.
+        }
+    }
+
     func acknowledge(_ id: String) {
         guard let index = state.signals.firstIndex(where: { $0.id == id }) else { return }
         state.signals[index].acknowledged = true
@@ -185,6 +222,16 @@ final class AppModel: ObservableObject {
             state.signals[index].acknowledged = true
         }
         if persist() { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids) }
+    }
+
+    func acknowledgeThreads(_ keys: Set<String>) {
+        guard ready else { return }
+        let ids = state.acknowledgeThreads(keys)
+        guard !ids.isEmpty else { return }
+        if persist() {
+            let delivered = pending.isEmpty ? ids + ["inbox-summary"] : ids
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: delivered)
+        }
     }
 
     func enterDemo() {

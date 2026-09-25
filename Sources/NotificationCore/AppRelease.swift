@@ -23,6 +23,10 @@ public struct AppRelease: Decodable {
         return installed.lexicographicallyPrecedes(latest)
     }
 
+    public func shouldNotify(installed: String, lastNotified: String?) -> Bool {
+        isNewer(than: installed) && Self.version(tag_name) != lastNotified.flatMap(Self.version)
+    }
+
     public static let downloadURL = URL(string: "https://github.com/zimathon/github-notification/releases/latest")!
 
     public static func fetch(session: URLSession = .shared) async throws -> AppRelease {

@@ -33,6 +33,7 @@ public partial class App : Application
             engine.State.Signals.Add(new Signal { Id = "demo-1", Kind = SignalKind.Mention, Repository = "octo-org/example", Title = "通知画面をコンパクトにする", Actor = "octocat", Excerpt = "@you 変更を確認してください。", Url = "https://github.com/octo-org/example/pull/1#issuecomment-1", Date = DateTimeOffset.UtcNow });
             engine.State.Signals.Add(new Signal { Id = "demo-2", Kind = SignalKind.ReviewRequest, Repository = "octo-org/example", Title = "通知画面をコンパクトにする", Actor = "hubot", Excerpt = "レビューを依頼しました", Url = "https://github.com/octo-org/example/pull/1", Date = DateTimeOffset.UtcNow.AddMinutes(-5) });
         }
+        if (demo) engine.State.PullRequests[engine.State.Signals[0].ThreadKey] = new("draft", DateTimeOffset.UtcNow);
         inbox = engine;
         var window = new MainWindow(engine, demo, lifetime.Token);
         MainWindow = window;
@@ -40,11 +41,13 @@ public partial class App : Application
         window.Closing += (_, args) => { if (!quitting) { args.Cancel = true; if (demo) Quit(); else window.Hide(); } };
         if (!demo) {
             tray = new TrayService(window.ShowInbox, Quit);
+            window.UpdateNotificationRequested += version => tray.Notify("GitHub Signalの新しいバージョン", $"{version} が公開されました。通知一覧からダウンロードできます。");
             window.TestNotificationRequested += () => tray.Notify("テスト通知", "GitHub Signalからの通知です。クリックすると通知一覧を開きます。");
             engine.Changed += () => tray.SetCount(engine.PendingCount);
             tray.SetCount(engine.PendingCount);
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             timer.Tick += async (_, _) => {
+                _ = window.CheckUpdateAsync();
                 await engine.SyncAsync(lifetime.Token);
                 if (lifetime.IsCancellationRequested) return;
                 var now = DateTimeOffset.UtcNow;

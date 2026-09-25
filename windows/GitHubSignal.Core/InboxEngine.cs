@@ -9,6 +9,7 @@ public sealed class InboxEngine
     private Task activeSync = Task.CompletedTask;
     public Task WaitForIdleAsync() => activeSync;
     private int serverPoll = 60;
+    private readonly Dictionary<string, DateTimeOffset> pullRequestAttempts = [];
     public InboxState State { get; private set; } = new();
     public bool Ready { get; private set; } = true;
     public bool Syncing { get; private set; }
@@ -81,7 +82,7 @@ public sealed class InboxEngine
                 // Rotate failed entries behind untouched work without discarding retry history.
                 State.Pending[pending.Thread.Id] = pending with { LastAttemptAt = DateTimeOffset.UtcNow };
                 try {
-                    var signals = await client.SignalsAsync(pending, login, token);
+                    var signals = await client.DetailsAsync(pending, login, token);
                     State.Merge(signals);
                     State.Processed[pending.Thread.Id] = pending.Thread.UpdatedAt;
                     State.Pending.Remove(pending.Thread.Id);
@@ -93,6 +94,7 @@ public sealed class InboxEngine
                     if (++failures >= 3) break;
                 }
             }
+            await RefreshPullRequestsAsync(token);
             if (State.Pending.Count == 0) LastSync = DateTimeOffset.UtcNow;
             else {
                 Error = $"{State.Pending.Count}件を取得できませんでした。5分後に再試行します。\n" + Error;
@@ -108,6 +110,30 @@ public sealed class InboxEngine
             currentSync.Dispose(); currentSync = null;
             Syncing = false;
             Changed?.Invoke();
+        }
+    }
+    private async Task RefreshPullRequestsAsync(CancellationToken token)
+    {
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset LastAttempt(string key) {
+            var attempt = pullRequestAttempts.GetValueOrDefault(key);
+            var check = State.PullRequests.GetValueOrDefault(key)?.CheckedAt ?? DateTimeOffset.MinValue;
+            return attempt > check ? attempt : check;
+        }
+        var candidates = Included.Where(x => !x.Acknowledged && PullRequestInfo.ApiPath(x) is not null)
+            .GroupBy(x => x.ThreadKey).Where(x => now - LastAttempt(x.Key) >= TimeSpan.FromMinutes(15) || LastAttempt(x.Key) > now)
+            .OrderBy(x => LastAttempt(x.Key)).ThenByDescending(x => x.Max(s => s.Date)).ThenBy(x => x.Key).Take(3).Select(x => x.First()).ToArray();
+        foreach (var signal in candidates) {
+            token.ThrowIfCancellationRequested();
+            if (!Ready || !State.Enabled) return;
+            pullRequestAttempts[signal.ThreadKey] = now;
+            try {
+                var info = await client.PullRequestAsync(signal, token);
+                token.ThrowIfCancellationRequested();
+                if (!Ready || !State.Enabled) return;
+                State.PullRequests[signal.ThreadKey] = info;
+            } catch (OperationCanceledException) { throw; }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or System.Text.Json.JsonException or TimeoutException or InvalidOperationException or KeyNotFoundException or FormatException or System.ComponentModel.Win32Exception) { break; }
         }
     }
     public List<Signal> Due(DateTimeOffset now) => !Ready || !State.Enabled ? [] : Included.Where(x =>

@@ -11,7 +11,7 @@ public sealed class StateStore(string path)
         var state = Json.Read<InboxState>(File.ReadAllText(Path));
         // Never silently replace corrupt or newer data with a new inbox.
         if (state.SchemaVersion != 1 || state.Signals is null || state.Pending is null || state.Processed is null ||
-            state.AcknowledgedBodyIds is null || state.Settings is null || state.Settings.Organizations is null ||
+            state.PullRequests is null || state.PullRequests.Any(x => x.Value is null) || state.AcknowledgedBodyIds is null || state.Settings is null || state.Settings.Organizations is null ||
             state.Signals.Any(x => x is null || x.Id is null || x.Url is null || x.Actor is null || x.Repository is null || x.Title is null || x.Excerpt is null) || state.Pending.Any(x => x.Value is null || x.Value.Thread is null || x.Value.Thread.Subject is null || x.Value.Thread.Repository is null))
             throw new InvalidDataException("保存データを読み込めません。ファイルを退避して内容を確認してください。");
         return state;

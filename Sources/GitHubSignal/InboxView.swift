@@ -9,6 +9,7 @@ struct InboxView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var filter = "すべて"
     @State private var search = ""
+    @AppStorage("inboxDateRange") private var dateRange = 0
     @State private var settingsOpen = false
     @State private var showAcknowledged = false
     @State private var organizationsInput = ""
@@ -25,6 +26,7 @@ struct InboxView: View {
                 && (search.isEmpty || "\($0.title) \($0.repository) \($0.actor) \($0.excerpt)".localizedCaseInsensitiveContains(search))
                 && (organization.isEmpty || owner(of: $0.repository) == organization)
                 && (repository.isEmpty || $0.repository == repository)
+                && (SignalDateRange(rawValue: dateRange) ?? .all).includes($0.date)
         }
     }
 
@@ -145,7 +147,7 @@ struct InboxView: View {
                 Picker("組織", selection: $organization) {
                     Text("すべての組織").tag("")
                     ForEach(organizations, id: \.self) { Text($0).tag($0) }
-                }.labelsHidden().frame(width: 100)
+                }.labelsHidden().frame(width: 85)
                     .onChange(of: organization) { _ in repository = "" }
                 Picker("リポジトリ", selection: $repository) {
                     Text("すべてのリポジトリ").tag("")
@@ -157,7 +159,12 @@ struct InboxView: View {
                 Picker("種類", selection: $filter) {
                     Text("すべての種類").tag("すべて")
                     ForEach(SignalKind.allCases, id: \.self) { kind in Text(kind.title).tag(kind.title) }
-                }.labelsHidden().frame(width: 105)
+                }.labelsHidden().frame(width: 95)
+                Picker("日付", selection: $dateRange) {
+                    ForEach(SignalDateRange.allCases, id: \.rawValue) { range in
+                        Text(range.title).tag(range.rawValue)
+                    }
+                }.labelsHidden().frame(width: 85).help("通知の日付（今日を含む）")
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
                 // These controls are AppKit views. They keep the appearance they
                 // were built with, so a light/dark switch alone leaves them stale
@@ -165,12 +172,18 @@ struct InboxView: View {
                 .id(colorScheme)
             HStack(spacing: 6) {
                 Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
-                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" {
-                    Button { organization = ""; repository = ""; filter = "すべて" } label: { Image(systemName: "xmark.circle") }
+                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 {
+                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0 } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("絞り込みを解除")
                         .accessibilityLabel("絞り込みを解除")
                 }
                 Spacer()
+                if !showAcknowledged {
+                    Button("一括確認") { model.acknowledgeThreads(Set(groups.map(\.id))) }
+                        .buttonStyle(.bordered).disabled(groups.isEmpty || !model.ready)
+                        .help("表示中のPR・Issueをすべて確認済みにする")
+                        .accessibilityLabel("表示中をすべて確認済みにする")
+                }
                 Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox)
                 TextField("検索", text: $search).textFieldStyle(.roundedBorder).frame(width: 110)
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
@@ -203,6 +216,7 @@ struct InboxView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(latest.repository).lineLimit(1)
+                        pullRequestBadge(latest)
                         Spacer()
                         Text(showAcknowledged ? "\(group.signals.count)件" : "未確認 \(group.signals.count)")
                         Text(latest.date, style: .relative).fixedSize()
@@ -295,6 +309,19 @@ struct InboxView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func pullRequestBadge(_ signal: Signal) -> some View {
+        if PullRequestInfo.apiPath(for: signal) != nil {
+            let info = model.state.pullRequests[signal.threadKey]
+            let color: Color = info?.status == "open" ? .green : info?.status == "merged" ? .purple : info?.status == "closed" ? .red : .secondary
+            Text(info?.label ?? "状態未取得")
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(color)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(color.opacity(0.12), in: Capsule()).fixedSize()
+                .help(info.map { "PRの状態 · 最終取得 " + $0.checkedAt.formatted(date: .abbreviated, time: .shortened) } ?? "PRの状態を順次取得します")
+        }
     }
 
     private func signalBadge(_ signal: Signal) -> some View {

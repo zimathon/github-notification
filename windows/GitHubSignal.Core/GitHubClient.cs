@@ -42,9 +42,22 @@ public sealed class GitHubClient(IGitHubTransport transport)
         return result;
     }
     public async Task<List<Signal>> SignalsAsync(PendingThread pending, string login, CancellationToken cancellation = default)
+        => (await DetailsAsync(pending, login, cancellation)).Signals;
+
+    public async Task<PullRequestInfo> PullRequestAsync(Signal signal, CancellationToken cancellation = default)
+    {
+        var path = PullRequestInfo.ApiPath(signal) ?? throw new InvalidDataException("PRのURLを確認できませんでした。");
+        var response = await transport.GetAsync(path, cancellation);
+        using var document = JsonDocument.Parse(response.Body);
+        var info = PullRequestInfo.FromJson(document.RootElement);
+        if (info.Status is null) throw new InvalidDataException("PRの状態を取得できませんでした。");
+        return info;
+    }
+
+    public async Task<SignalBatch> DetailsAsync(PendingThread pending, string login, CancellationToken cancellation = default)
     {
         var thread = pending.Thread;
-        if (thread.Subject.Type is not ("PullRequest" or "Issue")) return [];
+        if (thread.Subject.Type is not ("PullRequest" or "Issue")) return new([]);
         if (!Uri.TryCreate(thread.Subject.Url, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
             uri.Host != "api.github.com" || uri.UserInfo != "" || !uri.IsDefaultPort || uri.Query != "" || uri.Fragment != "" ||
             !Regex.IsMatch(uri.AbsolutePath, @"^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pulls|issues)/[0-9]+$"))
@@ -98,7 +111,7 @@ public sealed class GitHubClient(IGitHubTransport transport)
                 Append("request:" + id.GetInt64(), "あなたへのレビュー依頼", actor, created.GetDateTimeOffset(), Text(subject, "html_url"), forced: SignalKind.ReviewRequest);
             }
         }
-        return signals;
+        return new(signals, Rules.ThreadKey(thread.Repository.FullName, Text(subject, "html_url")), isPr ? PullRequestInfo.FromJson(subject) : null);
     }
     private static string Text(JsonElement item, string property) => item.GetProperty(property).GetString() ?? throw new InvalidDataException("GitHubからの応答が不完全です。");
     private static string? OptionalText(JsonElement item, string property) => item.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

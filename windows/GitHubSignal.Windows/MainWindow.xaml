@@ -7,12 +7,13 @@
         <StackPanel><TextBlock Text="GitHub Signal" FontSize="17" FontWeight="SemiBold"/><TextBlock x:Name="CountLabel" Foreground="#52606D" FontSize="12"/></StackPanel>
       </DockPanel>
       <Grid Margin="0,0,0,6">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <ComboBox x:Name="OwnerFilter" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Owner_Changed" Margin="0,0,5,0" ToolTip="組織・ユーザー"/>
         <ComboBox x:Name="RepositoryFilter" Grid.Column="1" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" Margin="0,0,5,0" ToolTip="リポジトリ"/>
-        <ComboBox x:Name="KindFilter" Grid.Column="2" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" ToolTip="通知の種類"/>
+        <ComboBox x:Name="KindFilter" Grid.Column="2" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" ToolTip="通知の種類" Margin="0,0,5,0"/>
+        <ComboBox x:Name="DateFilter" Grid.Column="3" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" ToolTip="通知の日付（今日を含む）"/>
       </Grid>
-      <DockPanel Margin="0,0,0,6"><CheckBox x:Name="ShowAcknowledged" DockPanel.Dock="Right" Content="確認済みも表示" VerticalAlignment="Center" Margin="8,0,0,0" Click="Filter_Changed"/><TextBox x:Name="SearchBox" TextChanged="Search_Changed" ToolTip="タイトル・投稿者で検索" AutomationProperties.Name="通知を検索"/></DockPanel>
+      <DockPanel Margin="0,0,0,6"><Button x:Name="AcknowledgeAllButton" DockPanel.Dock="Left" Content="一括確認" Click="AcknowledgeAll_Click" ToolTip="表示中のPR・Issueをすべて確認済みにする"/><CheckBox x:Name="ShowAcknowledged" DockPanel.Dock="Right" Content="確認済みも表示" VerticalAlignment="Center" Margin="8,0,0,0" Click="Filter_Changed"/><TextBox x:Name="SearchBox" TextChanged="Search_Changed" ToolTip="タイトル・投稿者で検索" AutomationProperties.Name="通知を検索"/></DockPanel>
       <Border x:Name="UpdateBanner" Background="#DFEEE5" Padding="6" Margin="0,0,0,6" Visibility="Collapsed"><Button x:Name="UpdateButton" Click="Update_Click" HorizontalAlignment="Stretch" Margin="0"/></Border>
       <TextBlock x:Name="ErrorLabel" TextWrapping="Wrap" Foreground="#A72B30" Margin="0,0,0,6" Visibility="Collapsed"/>
     </StackPanel>
@@ -24,7 +25,10 @@
             <DataTemplate>
               <Border Background="White" BorderBrush="#DCE2E8" BorderThickness="1" CornerRadius="7" Padding="9" Margin="0,0,0,7">
                 <StackPanel>
-                  <TextBlock Text="{Binding Repository}" FontSize="12" Foreground="#52606D"/>
+                  <DockPanel>
+                    <Border DockPanel.Dock="Right" Visibility="{Binding PrVisibility}" ToolTip="{Binding PrHelp}" CornerRadius="8" Padding="5,2" Margin="6,0,0,0" Background="{Binding PullRequest, Converter={StaticResource SignalBadge}, ConverterParameter=background}"><TextBlock Text="{Binding PrLabel}" FontSize="12" Foreground="{Binding PullRequest, Converter={StaticResource SignalBadge}}"/></Border>
+                    <TextBlock Text="{Binding Repository}" FontSize="12" Foreground="#52606D" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                  </DockPanel>
                   <Button Content="{Binding Title}" Tag="{Binding Url}" Click="Open_Click" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Foreground="#125EAD" FontWeight="SemiBold" Padding="0,4" Margin="0" ToolTip="GitHubで開く">
                     <Button.ContentTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate></Button.ContentTemplate>
                   </Button>

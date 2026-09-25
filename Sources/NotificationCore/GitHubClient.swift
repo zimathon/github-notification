@@ -64,8 +64,21 @@ public struct GitHubClient {
     }
 
     public func signals(for pending: PendingThread, login: String) async throws -> [Signal] {
+        try await details(for: pending, login: login).signals
+    }
+
+    public func pullRequest(for signal: Signal) async throws -> PullRequestInfo {
+        guard let path = PullRequestInfo.apiPath(for: signal) else { throw SignalError.message("PRのURLを確認できませんでした。") }
+        let response = try await transport.get(path)
+        let subject = try JSONCoding.decoder().decode(Subject.self, from: response.data)
+        let info = PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged)
+        guard info.status != nil else { throw SignalError.message("PRの状態を取得できませんでした。") }
+        return info
+    }
+
+    public func details(for pending: PendingThread, login: String) async throws -> SignalBatch {
         let thread = pending.thread
-        guard ["PullRequest", "Issue"].contains(thread.subject.type) else { return [] }
+        guard ["PullRequest", "Issue"].contains(thread.subject.type) else { return SignalBatch(signals: []) }
         guard let rawURL = thread.subject.url, let url = URL(string: rawURL),
               url.scheme == "https", url.host == "api.github.com", url.user == nil,
               url.password == nil, url.port == nil, url.query == nil,
@@ -126,13 +139,15 @@ public struct GitHubClient {
                        date: date, webURL: subject.htmlUrl, kind: .reviewRequest)
             }
         }
-        return result
+        let key = Signal(id: "", kind: .review, repository: thread.repository.fullName, title: "", actor: "", excerpt: "", url: subject.htmlUrl, date: Date()).threadKey
+        return SignalBatch(signals: result, threadKey: key, pullRequest: isPR ? PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged) : nil)
     }
 }
 
 private struct Subject: Decodable {
     var title: String; var body: String?; var user: GitHubUser
     var htmlUrl: String; var updatedAt: Date
+    var state: String?; var draft: Bool?; var merged: Bool?
 }
 private struct Comment: Decodable {
     var id: Int64; var body: String?; var user: GitHubUser

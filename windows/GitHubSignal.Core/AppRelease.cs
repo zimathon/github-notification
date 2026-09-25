@@ -11,6 +11,8 @@ public sealed record AppRelease([property: JsonPropertyName("tag_name")] string 
     public bool IsNewer(string installed) => !Draft && !Prerelease && ParseVersion(TagName) is { } latest &&
         ParseVersion(installed) is { } current && latest > current &&
         Assets is not null && Assets.Any(x => x is not null && x.Name is not null && x.State == "uploaded" && x.Name.EndsWith("-windows-x64.zip", StringComparison.OrdinalIgnoreCase));
+    public bool ShouldNotify(string installed, string? lastNotified) =>
+        IsNewer(installed) && (lastNotified is null || ParseVersion(TagName) != ParseVersion(lastNotified));
     public static async Task<AppRelease> FetchAsync(HttpClient client, CancellationToken cancellation = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/zimathon/github-notification/releases/latest");

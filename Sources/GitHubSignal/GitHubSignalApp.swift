@@ -29,7 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let id = response.notification.request.content.userInfo["signalID"] as? String
         Task { @MainActor in
             defer { completionHandler() }
-            if let id {
+            if response.notification.request.content.userInfo["appUpdate"] as? Bool == true {
+                if response.actionIdentifier == UNNotificationDefaultActionIdentifier { model.openRelease() }
+            } else if let id {
                 switch response.actionIdentifier {
                 case "ACK": model.acknowledge(id)
                 case "SNOOZE": model.snooze(id)

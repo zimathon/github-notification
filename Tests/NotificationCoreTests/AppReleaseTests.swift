@@ -24,6 +24,18 @@ final class AppReleaseTests: XCTestCase {
         }
     }
 
+    func testUpdateNotificationDeduplicationSurvivesRestart() throws {
+        let latest = try release("v0.2.2")
+        var state = InboxState()
+        XCTAssertTrue(latest.shouldNotify(installed: "0.2.1", lastNotified: state.lastNotifiedRelease))
+        state.lastNotifiedRelease = "0.2.2"
+        let restored = try JSONDecoder().decode(InboxState.self, from: JSONEncoder().encode(state))
+        XCTAssertFalse(latest.shouldNotify(installed: "0.2.1", lastNotified: restored.lastNotifiedRelease))
+        XCTAssertFalse(latest.shouldNotify(installed: "0.2.2", lastNotified: nil))
+        XCTAssertFalse(try release("v0.3.0", prerelease: true).shouldNotify(installed: "0.2.1", lastNotified: nil))
+        XCTAssertTrue(try release("v0.2.3").shouldNotify(installed: "0.2.1", lastNotified: restored.lastNotifiedRelease))
+    }
+
     func testNumericVersionOrdering() throws {
         XCTAssertTrue(try release("v0.1.10").isNewer(than: "0.1.9"))
         XCTAssertTrue(try release("v1.0.0").isNewer(than: "0.99.99"))

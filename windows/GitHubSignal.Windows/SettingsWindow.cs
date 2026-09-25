@@ -40,7 +40,7 @@ internal sealed class SettingsWindow : Window
                 if (!int.TryParse(poll.Text, out int seconds) || seconds < 120 || seconds > 600) throw new InvalidDataException("取得間隔は120〜600秒で入力してください。");
                 if (!int.TryParse(reminder.Text, out int minutes) || minutes < 0 || minutes > 1440) throw new InvalidDataException("再通知は0〜1440分で入力してください。");
                 Result = new Settings { Organizations = Settings.ParseOrganizations(owners.Text), PollSeconds = seconds, ReminderMinutes = minutes, IncludeBots = bots.IsChecked == true,
-                    ViewOrganization = current.ViewOrganization, ViewRepository = current.ViewRepository };
+                    ViewOrganization = current.ViewOrganization, ViewRepository = current.ViewRepository, ViewDays = current.ViewDays };
                 DialogResult = true;
             } catch (InvalidDataException exception) { error.Text = exception.Message; }
         };

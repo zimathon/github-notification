@@ -155,6 +155,8 @@ public struct InboxState: Codable {
     public var enabled = false
     public var account: String?
     public var cursor: Date?
+    public var lastNotifiedRelease: String?
+    public var pullRequests: [String: PullRequestInfo] = [:]
     public var signals: [Signal] = []
     public var pending: [String: PendingThread] = [:]
     public var processed: [String: Date] = [:]
@@ -163,7 +165,7 @@ public struct InboxState: Codable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case enabled, account, cursor, signals, pending, processed, acknowledgedBodyIDs, settings
+        case pullRequests, lastNotifiedRelease, enabled, account, cursor, signals, pending, processed, acknowledgedBodyIDs, settings
     }
 
     public init(from decoder: Decoder) throws {
@@ -171,6 +173,8 @@ public struct InboxState: Codable {
         enabled = try values.decode(Bool.self, forKey: .enabled)
         account = try values.decodeIfPresent(String.self, forKey: .account)
         cursor = try values.decodeIfPresent(Date.self, forKey: .cursor)
+        lastNotifiedRelease = try values.decodeIfPresent(String.self, forKey: .lastNotifiedRelease)
+        pullRequests = try values.decodeIfPresent([String: PullRequestInfo].self, forKey: .pullRequests) ?? [:]
         signals = try values.decode([Signal].self, forKey: .signals)
         pending = try values.decode([String: PendingThread].self, forKey: .pending)
         processed = try values.decode([String: Date].self, forKey: .processed)
@@ -190,6 +194,20 @@ public struct InboxState: Codable {
             }
         }
         return acknowledged
+    }
+
+    public mutating func acknowledgeThreads(_ keys: Set<String>) -> [String] {
+        var ids: [String] = []
+        for index in signals.indices where keys.contains(signals[index].threadKey) && !signals[index].acknowledged {
+            signals[index].acknowledged = true
+            ids.append(signals[index].id)
+        }
+        return ids
+    }
+
+    public mutating func merge(_ batch: SignalBatch) {
+        merge(batch.signals)
+        if let key = batch.threadKey, let info = batch.pullRequest, info.status != nil { pullRequests[key] = info }
     }
 
     public mutating func merge(_ incoming: [Signal]) {
@@ -212,6 +230,8 @@ public struct InboxState: Codable {
         }
         signals.removeAll { $0.acknowledged && $0.date < cutoff }
         processed = processed.filter { $0.value >= cutoff }
+        let retained = Set(signals.map(\.threadKey))
+        pullRequests = pullRequests.filter { retained.contains($0.key) }
     }
 }
 

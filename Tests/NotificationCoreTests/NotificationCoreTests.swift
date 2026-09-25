@@ -211,6 +211,42 @@ final class NotificationCoreTests: XCTestCase {
         XCTAssertTrue(paths.isEmpty)
     }
 
+    func testPRStatusUpdatesWithoutNewSignalsAndPreservesAcknowledgement() async throws {
+        var state = InboxState()
+        var saved = signal("existing"); saved.acknowledged = true
+        state.signals = [saved]
+        for (apiState, draft, merged, expected) in [("open", false, false, "open"), ("open", true, false, "draft"), ("closed", false, true, "merged"), ("closed", true, false, "closed")] {
+            var responses = subjectResponses(owner: "me", body: "", comments: "[]")
+            var subject = try JSONSerialization.jsonObject(with: responses[0].data) as! [String: Any]
+            subject["state"] = apiState; subject["draft"] = draft; subject["merged"] = merged
+            responses[0] = APIResponse(data: try JSONSerialization.data(withJSONObject: subject))
+            let batch = try await GitHubClient(transport: StubTransport(responses: responses)).details(for: PendingThread(thread: decodeThread(), since: now), login: "me")
+            XCTAssertTrue(batch.signals.isEmpty)
+            state.merge(batch)
+            let restored = try JSONDecoder().decode(InboxState.self, from: JSONEncoder().encode(state))
+            XCTAssertEqual(restored.pullRequests[saved.threadKey]?.status, expected)
+            XCTAssertTrue(restored.signals[0].acknowledged)
+            XCTAssertEqual(restored.signals.count, 1)
+            state.merge(SignalBatch(signals: [], threadKey: saved.threadKey, pullRequest: PullRequestInfo(state: nil, draft: nil, merged: nil)))
+            XCTAssertEqual(state.pullRequests[saved.threadKey]?.status, expected)
+        }
+    }
+
+    func testPRStatusRefreshRejectsForeignAndIssueURLs() async throws {
+        var value = signal("1")
+        XCTAssertEqual(PullRequestInfo.apiPath(for: value), "/repos/org/repo/pulls/1")
+        value.url = "https://github.com/pull/pull/pull/1/files"
+        XCTAssertEqual(PullRequestInfo.apiPath(for: value), "/repos/pull/pull/pulls/1")
+        for url in ["https://evil.test/org/repo/pull/1", "https://github.com/org/repo/issues/1", "https://github.com/org/repo/pull/not-a-number"] {
+            value.url = url
+            let transport = StubTransport(responses: [])
+            do { _ = try await GitHubClient(transport: transport).pullRequest(for: value); XCTFail("Must reject") }
+            catch { }
+            let paths = await transport.paths
+            XCTAssertTrue(paths.isEmpty)
+        }
+    }
+
     private func signal(_ id: String) -> Signal {
         Signal(id: id, kind: .mention, repository: "org/repo", title: "Title", actor: "other", excerpt: "@me", url: "https://github.com/org/repo/pull/1", date: now)
     }
