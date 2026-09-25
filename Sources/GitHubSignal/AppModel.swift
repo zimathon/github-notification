@@ -235,8 +235,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func open(_ signal: Signal) {
-        if let url = SignalRules.safeWebURL(signal.url) { NSWorkspace.shared.open(url) }
+    func open(_ signal: Signal, entireThread: Bool = false) {
+        guard ready else { return }
+        let ids = state.openSignal(signal.id, entireThread: entireThread) { NSWorkspace.shared.open($0) }
+        if !ids.isEmpty, persist() {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        }
     }
 
     func copyURL(_ signal: Signal) {
@@ -277,7 +281,7 @@ final class AppModel: ObservableObject {
             } else {
                 for signal in due {
                     let content = UNMutableNotificationContent()
-                    content.title = signal.kind.title
+                    content.title = signal.kindLabel
                     content.subtitle = "\(signal.repository) · @\(signal.actor)"
                     content.body = signal.title + "\n" + String(signal.excerpt.prefix(180))
                     content.sound = .default

@@ -8,6 +8,8 @@ Mac版はSwiftUIとmacOS標準ライブラリだけで実装している。WebVi
 
 一覧は同じPR・Issueを1件にまとめ、開くと個別のコメントやレビューを確認できる。メニューバーにもPR・Issue単位の未確認件数を常時表示する。スヌーズ中も件数に含め、0件のときも「0」を表示する。
 
+承認されたレビューは一覧で`Approve`と表示する。タイトルや「GitHubで開く」からブラウザに引き渡せたら確認済みになる。URLコピーだけでは確認済みにしない。
+
 ## Windows版
 
 [Releases](https://github.com/zimathon/github-notification/releases/latest)から`GitHubSignal-<version>-windows-x64.zip`をダウンロードし、ZIP全体を展開して`GitHubSignal.exe`を起動する。Windows 11 x64向けで、.NETランタイムを同梱しているため.NETの事前インストールは不要。コード署名は行っていない。
@@ -96,7 +98,7 @@ Notifications APIには`notifications`または`repo`の権限が必要で、非
 
 | 操作 | 動作 |
 | --- | --- |
-| GitHubで開く | 該当するPR・コメントをブラウザで開く。未確認のまま残す |
+| GitHubで開く | ブラウザに引き渡せたら確認済みにする。一覧行からならPR全体、個別の更新からならその通知だけが対象 |
 | 確認済み | アプリ内の未確認一覧から外す。GitHub側の既読は変更しない |
 | 1時間後 | その通知の再通知を1時間止める。新しいコメントは別の通知として届く |
 | 未確認の再通知 | 既定は30分。設定で15分・1時間・なしに変更できる |

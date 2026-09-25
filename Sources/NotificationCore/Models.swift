@@ -26,6 +26,13 @@ public struct Signal: Codable, Identifiable, Equatable {
     public var snoozedUntil: Date?
     public var lastNotifiedAt: Date?
 
+    // Review IDs already retain GitHub's state, including in previously saved inboxes.
+    public var isApproval: Bool {
+        id.range(of: #"^review:[0-9]+:APPROVED$"#, options: .regularExpression) != nil
+    }
+
+    public var kindLabel: String { isApproval ? "Approve" : kind.title }
+
     public var threadKey: String {
         guard var components = URLComponents(string: url) else { return repository + ":" + url }
         let parts = components.path.split(separator: "/")
@@ -153,6 +160,20 @@ public struct InboxState: Codable {
         processed = try values.decode([String: Date].self, forKey: .processed)
         acknowledgedBodyIDs = try values.decodeIfPresent(Set<String>.self, forKey: .acknowledgedBodyIDs) ?? []
         settings = try values.decode(Settings.self, forKey: .settings)
+    }
+
+    /// Acknowledge only after the browser accepts the URL. Group rows cover the entire PR.
+    public mutating func openSignal(_ id: String, entireThread: Bool, using opener: (URL) -> Bool) -> [String] {
+        guard let signal = signals.first(where: { $0.id == id }),
+              let url = SignalRules.safeWebURL(signal.url), opener(url) else { return [] }
+        var acknowledged: [String] = []
+        for index in signals.indices where entireThread ? signals[index].threadKey == signal.threadKey : signals[index].id == id {
+            if !signals[index].acknowledged {
+                signals[index].acknowledged = true
+                acknowledged.append(signals[index].id)
+            }
+        }
+        return acknowledged
     }
 
     public mutating func merge(_ incoming: [Signal]) {

@@ -215,7 +215,7 @@ struct InboxView: View {
                             .accessibilityLabel("\(latest.title)の更新を\(expanded ? "閉じる" : "展開する")")
                             .help(expanded ? "更新を閉じる" : "更新を展開する")
                     }.font(.system(size: 12)).foregroundStyle(.secondary)
-                    Button { model.open(latest) } label: {
+                    Button { model.open(latest, entireThread: true) } label: {
                         Text(latest.title).font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.primary).lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -230,13 +230,13 @@ struct InboxView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("@" + latest.actor).fontWeight(.semibold).lineLimit(1)
                                     .help(latest.actor)
-                                Text(shortLabel(latest.kind)).font(.system(size: 12))
+                                Text(shortLabel(latest)).font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                             }
                         }
                         Spacer()
                         HStack(spacing: 6) {
-                            Button("GitHubで開く") { model.open(latest) }
+                            Button("GitHubで開く") { model.open(latest, entireThread: true) }
                             Button { model.copyURL(latest) } label: {
                                 Image(systemName: "doc.on.doc")
                             }.help("URLをコピー").accessibilityLabel("URLをコピー")
@@ -262,7 +262,7 @@ struct InboxView: View {
             HStack(spacing: 6) {
                 ActorAvatar(actor: signal.actor)
                 Text("@" + signal.actor).fontWeight(.semibold).lineLimit(1).help(signal.actor)
-                Text(shortLabel(signal.kind)).foregroundStyle(.secondary).help(signal.kind.title)
+                Text(shortLabel(signal)).foregroundStyle(.secondary).help(signal.kindLabel)
                 Spacer()
                 if snoozed {
                     Image(systemName: "moon.zzz").foregroundStyle(.orange).help("スヌーズ中")
@@ -298,8 +298,9 @@ struct InboxView: View {
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
-    private func shortLabel(_ kind: SignalKind) -> String {
-        switch kind {
+    private func shortLabel(_ signal: Signal) -> String {
+        if signal.isApproval { return "Approve" }
+        switch signal.kind {
         case .mention: return "メンション"
         case .reviewRequest: return "レビュー依頼"
         case .comment: return "コメント"

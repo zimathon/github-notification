@@ -20,7 +20,8 @@ public sealed record Signal
     public bool Acknowledged { get; set; }
     public DateTimeOffset? SnoozedUntil { get; set; }
     public DateTimeOffset? LastNotifiedAt { get; set; }
-    [JsonIgnore] public string KindLabel => Rules.Label(Kind);
+    [JsonIgnore] public bool IsApproval => Regex.IsMatch(Id, @"^review:[0-9]+:APPROVED$", RegexOptions.CultureInvariant);
+    [JsonIgnore] public string KindLabel => IsApproval ? "Approve" : Rules.Label(Kind);
     [JsonIgnore] public string Preview => Rules.Preview(Excerpt);
     [JsonIgnore] public string ActorLabel => "@" + Actor;
     [JsonIgnore] public string TimeLabel => Date.ToLocalTime().ToString("MM/dd HH:mm");
@@ -81,6 +82,12 @@ public sealed class InboxState
             Pending[thread.Id] = new(thread, boundary, old?.LastAttemptAt);
         }
         Cursor = cursor;
+    }
+    public void OpenSignal(string id, bool entireThread, Func<Uri, bool> opener)
+    {
+        var signal = Signals.FirstOrDefault(x => x.Id == id);
+        if (signal is null || Rules.SafeWebUrl(signal.Url) is not { } uri || !opener(uri)) return;
+        foreach (var item in Signals.Where(x => entireThread ? x.ThreadKey == signal.ThreadKey : x.Id == id)) item.Acknowledged = true;
     }
     public void AcknowledgeThread(string key)
     {

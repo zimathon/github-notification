@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <Company>zimathon</Company>
     <Copyright>GitHub Signal contributors</Copyright>
   </PropertyGroup>

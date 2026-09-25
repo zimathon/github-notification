@@ -20,6 +20,26 @@ Test("Shared Mac/Windows mention and classification fixtures", () => {
     foreach (var item in document.RootElement.GetProperty("mentions").EnumerateArray()) Equal(item.GetProperty("expected").GetBoolean(), Rules.Mentions(item.GetProperty("body").GetString()!, item.GetProperty("login").GetString()!));
     foreach (var item in document.RootElement.GetProperty("classification").EnumerateArray()) Equal(item.GetProperty("expected").GetString(), Rules.Kind(item.GetProperty("body").GetString()!, item.GetProperty("actor").GetString()!, "zimathon", item.GetProperty("ownPR").GetBoolean(), item.GetProperty("review").GetBoolean())?.ToString().ToLowerInvariant());
 });
+Test("Approval label uses persisted state and preserves classification", () => {
+    var approval = Signal("review:123:APPROVED") with { Kind = SignalKind.Review };
+    var restored = Json.Read<Signal>(JsonSerializer.Serialize(approval, Json.Options));
+    Equal("Approve", restored.KindLabel); Equal(SignalKind.Review, restored.Kind);
+    var mention = approval with { Kind = SignalKind.Mention };
+    Equal("Approve", mention.KindLabel); Equal(SignalKind.Mention, mention.Kind);
+    foreach (var id in new[] { "review:123:COMMENTED", "review:123:CHANGES_REQUESTED", "review:123:DISMISSED", "comment:123:APPROVED", "request:123", "review::APPROVED" }) {
+        var other = Signal(id) with { Kind = SignalKind.Review, Excerpt = "Approve" };
+        Equal(false, other.IsApproval); Equal(Rules.Label(SignalKind.Review), other.KindLabel);
+    }
+});
+Test("Opening acknowledges the selected scope only on browser success", () => {
+    var state = new InboxState { Signals = [Signal("one"), Signal("two"), Signal("other", "https://github.com/acme/repo/pull/2")] };
+    state.OpenSignal("one", true, _ => false); Equal(true, state.Signals.All(x => !x.Acknowledged));
+    state.OpenSignal("one", false, _ => true); Equal(true, state.Signals[0].Acknowledged); Equal(false, state.Signals[1].Acknowledged);
+    state.OpenSignal("one", true, _ => true); Equal(true, state.Signals[1].Acknowledged); Equal(false, state.Signals[2].Acknowledged);
+    state.Signals[2] = state.Signals[2] with { Url = "file:///tmp/test" };
+    bool called = false; state.OpenSignal("other", true, _ => { called = true; return true; });
+    Equal(false, called); Equal(false, state.Signals[2].Acknowledged);
+});
 Test("PR grouping ignores comments, files, query and fragment", () => {
     Equal(Signal("1").ThreadKey, Signal("2", "https://github.com/acme/repo/pull/1/files?diff=split#x").ThreadKey);
     Equal(false, Signal("1").ThreadKey == Signal("2", "https://github.com/acme/repo/issues/2").ThreadKey);

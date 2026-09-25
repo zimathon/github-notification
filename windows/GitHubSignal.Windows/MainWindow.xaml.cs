@@ -115,7 +115,13 @@ public partial class MainWindow : Window
     private void Snooze_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => {
         foreach (var signal in x.Signals.Where(s => s.ThreadKey == (string)((Button)sender).Tag && !s.Acknowledged)) signal.SnoozedUntil = DateTimeOffset.UtcNow.AddHours(1);
     });
-    private void Open_Click(object sender, RoutedEventArgs e) => OpenUrl((string)((Button)sender).Tag);
+    private void Open_Click(object sender, RoutedEventArgs e)
+    {
+        switch (((Button)sender).DataContext) {
+            case ThreadRow row: engine.Mutate(x => x.OpenSignal(row.Latest.Id, true, uri => OpenUrl(uri.AbsoluteUri))); break;
+            case Signal signal: engine.Mutate(x => x.OpenSignal(signal.Id, false, uri => OpenUrl(uri.AbsoluteUri))); break;
+        }
+    }
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
         var value = (string)((Button)sender).Tag;
@@ -123,11 +129,11 @@ public partial class MainWindow : Window
         try { Clipboard.SetText(value); StatusLabel.Text = "URLをコピーしました。"; }
         catch (System.Runtime.InteropServices.COMException) { StatusLabel.Text = "コピーできませんでした。もう一度お試しください。"; }
     }
-    private void OpenUrl(string value)
+    private bool OpenUrl(string value)
     {
-        if (Rules.SafeWebUrl(value) is null) return;
-        try { Process.Start(new ProcessStartInfo(value) { UseShellExecute = true }); }
-        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException) { StatusLabel.Text = "ブラウザを開けませんでした。URLをコピーしてください。"; }
+        if (Rules.SafeWebUrl(value) is null) return false;
+        try { using var process = Process.Start(new ProcessStartInfo(value) { UseShellExecute = true }); return true; }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException) { StatusLabel.Text = "ブラウザを開けませんでした。URLをコピーしてください。"; return false; }
     }
     private void Quit_Click(object sender, RoutedEventArgs e) => QuitRequested?.Invoke();
     private void Settings_Click(object sender, RoutedEventArgs e)
