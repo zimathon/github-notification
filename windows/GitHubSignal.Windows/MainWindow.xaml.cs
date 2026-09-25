@@ -23,7 +23,7 @@ public sealed record ThreadRow(string Key, List<Signal> Signals)
     public string Url => Latest.Url;
     public string Preview => Latest.Preview;
     public bool HasPending => Signals.Any(x => !x.Acknowledged);
-    public string Summary => $"@{Latest.Actor} · {Latest.KindLabel} · {Latest.TimeLabel}";
+    public string Summary => $"@{Latest.Actor} · {Latest.TimeLabel}";
     public string DetailsLabel => $"通知の詳細（{Signals.Count}件）";
 }
 

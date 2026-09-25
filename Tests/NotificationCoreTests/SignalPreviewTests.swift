@@ -20,14 +20,19 @@ final class SignalPreviewTests: XCTestCase {
         let approval = signal("review:123:APPROVED")
         // A previously saved notification needs no migration or API refetch.
         let restored = try JSONDecoder().decode(Signal.self, from: JSONEncoder().encode(approval))
-        XCTAssertEqual(restored.kindLabel, "PRが承認された")
+        XCTAssertEqual(restored.kindLabel, "✅ 承認")
         XCTAssertEqual(restored.kind, .review)
         let mentionedApproval = signal("review:123:APPROVED", kind: .mention)
-        XCTAssertEqual(mentionedApproval.kindLabel, "PRが承認された")
+        XCTAssertEqual(mentionedApproval.kindLabel, "✅ 承認")
         XCTAssertEqual(mentionedApproval.kind, .mention)
-        for id in ["review:123:COMMENTED", "review:123:CHANGES_REQUESTED", "review:123:DISMISSED", "comment:123:APPROVED", "request:123", "review::APPROVED"] {
+        XCTAssertEqual(signal("review:123:CHANGES_REQUESTED").kindLabel, "✏️ 修正依頼")
+        XCTAssertEqual(signal("review:123:DISMISSED").kindLabel, "↩️ レビュー取消")
+        XCTAssertEqual(signal("review:123:COMMENTED", kind: .mention).kindLabel, "📣 メンション")
+        XCTAssertEqual(signal("request:123", kind: .reviewRequest).kindLabel, "👀 レビュー依頼")
+        XCTAssertEqual(signal("comment:123", kind: .comment).kindLabel, "💬 コメント")
+        for id in ["review:123:COMMENTED", "comment:123:APPROVED", "request:123", "review::APPROVED"] {
             XCTAssertFalse(signal(id).isApproval, id)
-            XCTAssertEqual(signal(id).kindLabel, SignalKind.review.title)
+            XCTAssertEqual(signal(id).kindLabel, "📝 レビュー")
         }
     }
 

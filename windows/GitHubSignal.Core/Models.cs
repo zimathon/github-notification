@@ -20,8 +20,19 @@ public sealed record Signal
     public bool Acknowledged { get; set; }
     public DateTimeOffset? SnoozedUntil { get; set; }
     public DateTimeOffset? LastNotifiedAt { get; set; }
-    [JsonIgnore] public bool IsApproval => Regex.IsMatch(Id, @"^review:[0-9]+:APPROVED$", RegexOptions.CultureInvariant);
-    [JsonIgnore] public string KindLabel => IsApproval ? "PRが承認された" : Rules.Label(Kind);
+    [JsonIgnore] public string? ReviewState => Regex.IsMatch(Id, @"^review:[0-9]+:[A-Z_]+$", RegexOptions.CultureInvariant) ? Id.Split(':')[2] : null;
+    [JsonIgnore] public bool IsApproval => ReviewState == "APPROVED";
+    [JsonIgnore] public string KindLabel => ReviewState switch {
+        "APPROVED" => "✅ 承認",
+        "CHANGES_REQUESTED" => "✏️ 修正依頼",
+        "DISMISSED" => "↩️ レビュー取消",
+        _ => Kind switch {
+            SignalKind.Mention => "📣 メンション",
+            SignalKind.ReviewRequest => "👀 レビュー依頼",
+            SignalKind.Comment => "💬 コメント",
+            _ => "📝 レビュー"
+        }
+    };
     [JsonIgnore] public string Preview => Rules.Preview(Excerpt);
     [JsonIgnore] public string ActorLabel => "@" + Actor;
     [JsonIgnore] public string TimeLabel => Date.ToLocalTime().ToString("MM/dd HH:mm");

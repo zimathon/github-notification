@@ -23,12 +23,17 @@ Test("Shared Mac/Windows mention and classification fixtures", () => {
 Test("Approval label uses persisted state and preserves classification", () => {
     var approval = Signal("review:123:APPROVED") with { Kind = SignalKind.Review };
     var restored = Json.Read<Signal>(JsonSerializer.Serialize(approval, Json.Options));
-    Equal("PRが承認された", restored.KindLabel); Equal(SignalKind.Review, restored.Kind);
+    Equal("✅ 承認", restored.KindLabel); Equal(SignalKind.Review, restored.Kind);
     var mention = approval with { Kind = SignalKind.Mention };
-    Equal("PRが承認された", mention.KindLabel); Equal(SignalKind.Mention, mention.Kind);
-    foreach (var id in new[] { "review:123:COMMENTED", "review:123:CHANGES_REQUESTED", "review:123:DISMISSED", "comment:123:APPROVED", "request:123", "review::APPROVED" }) {
-        var other = Signal(id) with { Kind = SignalKind.Review, Excerpt = "PRが承認された" };
-        Equal(false, other.IsApproval); Equal(Rules.Label(SignalKind.Review), other.KindLabel);
+    Equal("✅ 承認", mention.KindLabel); Equal(SignalKind.Mention, mention.Kind);
+    Equal("✏️ 修正依頼", (approval with { Id = "review:123:CHANGES_REQUESTED" }).KindLabel);
+    Equal("↩️ レビュー取消", (approval with { Id = "review:123:DISMISSED" }).KindLabel);
+    Equal("📣 メンション", (mention with { Id = "review:123:COMMENTED" }).KindLabel);
+    Equal("👀 レビュー依頼", (approval with { Id = "request:123", Kind = SignalKind.ReviewRequest }).KindLabel);
+    Equal("💬 コメント", (approval with { Id = "comment:123", Kind = SignalKind.Comment }).KindLabel);
+    foreach (var id in new[] { "review:123:COMMENTED", "comment:123:APPROVED", "request:123", "review::APPROVED" }) {
+        var other = Signal(id) with { Kind = SignalKind.Review, Excerpt = "✅ 承認" };
+        Equal(false, other.IsApproval); Equal("📝 レビュー", other.KindLabel);
     }
 });
 Test("Opening acknowledges the selected scope only on browser success", () => {

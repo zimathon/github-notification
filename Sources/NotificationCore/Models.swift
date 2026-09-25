@@ -27,11 +27,27 @@ public struct Signal: Codable, Identifiable, Equatable {
     public var lastNotifiedAt: Date?
 
     // Review IDs already retain GitHub's state, including in previously saved inboxes.
-    public var isApproval: Bool {
-        id.range(of: #"^review:[0-9]+:APPROVED$"#, options: .regularExpression) != nil
+    public var reviewState: String? {
+        guard id.range(of: #"^review:[0-9]+:[A-Z_]+$"#, options: .regularExpression) != nil else { return nil }
+        return id.split(separator: ":").last.map(String.init)
     }
 
-    public var kindLabel: String { isApproval ? "PRが承認された" : kind.title }
+    public var isApproval: Bool { reviewState == "APPROVED" }
+
+    public var kindLabel: String {
+        switch reviewState {
+        case "APPROVED": return "✅ 承認"
+        case "CHANGES_REQUESTED": return "✏️ 修正依頼"
+        case "DISMISSED": return "↩️ レビュー取消"
+        default:
+            switch kind {
+            case .mention: return "📣 メンション"
+            case .reviewRequest: return "👀 レビュー依頼"
+            case .comment: return "💬 コメント"
+            case .review: return "📝 レビュー"
+            }
+        }
+    }
 
     public var threadKey: String {
         guard var components = URLComponents(string: url) else { return repository + ":" + url }

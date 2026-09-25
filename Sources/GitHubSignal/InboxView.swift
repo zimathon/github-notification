@@ -230,8 +230,7 @@ struct InboxView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("@" + latest.actor).fontWeight(.semibold).lineLimit(1)
                                     .help(latest.actor)
-                                Text(shortLabel(latest)).font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
+                                signalBadge(latest)
                             }
                         }
                         Spacer()
@@ -262,7 +261,7 @@ struct InboxView: View {
             HStack(spacing: 6) {
                 ActorAvatar(actor: signal.actor)
                 Text("@" + signal.actor).fontWeight(.semibold).lineLimit(1).help(signal.actor)
-                Text(shortLabel(signal)).foregroundStyle(.secondary).help(signal.kindLabel)
+                signalBadge(signal)
                 Spacer()
                 if snoozed {
                     Image(systemName: "moon.zzz").foregroundStyle(.orange).help("スヌーズ中")
@@ -298,14 +297,26 @@ struct InboxView: View {
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
 
-    private func shortLabel(_ signal: Signal) -> String {
-        if signal.isApproval { return "PRが承認された" }
-        switch signal.kind {
-        case .mention: return "メンション"
-        case .reviewRequest: return "レビュー依頼"
-        case .comment: return "コメント"
-        case .review: return "レビュー"
+    private func signalBadge(_ signal: Signal) -> some View {
+        let color: Color
+        switch signal.reviewState {
+        case "APPROVED": color = .green
+        case "CHANGES_REQUESTED": color = .orange
+        case "DISMISSED": color = .secondary
+        default:
+            switch signal.kind {
+            case .mention: color = .purple
+            case .reviewRequest: color = .indigo
+            case .comment: color = .blue
+            case .review: color = .secondary
+            }
         }
+        return Text(signal.kindLabel)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .fixedSize()
     }
 
     private var footer: some View {

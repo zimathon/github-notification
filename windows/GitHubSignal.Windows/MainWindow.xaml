@@ -1,4 +1,5 @@
-<Window x:Class="GitHubSignal.Windows.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="GitHub Signal" Width="460" Height="420" MinWidth="420" MinHeight="330" FontFamily="Yu Gothic UI, Segoe UI" FontSize="13" Background="#F5F7FA" Icon="Assets/AppIcon.ico" WindowStartupLocation="CenterScreen">
+<Window x:Class="GitHubSignal.Windows.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:GitHubSignal.Windows" Title="GitHub Signal" Width="460" Height="420" MinWidth="420" MinHeight="330" FontFamily="Yu Gothic UI, Segoe UI" FontSize="13" Background="#F5F7FA" Icon="Assets/AppIcon.ico" WindowStartupLocation="CenterScreen">
+  <Window.Resources><local:SignalBadgeConverter x:Key="SignalBadge"/></Window.Resources>
   <DockPanel Margin="12">
     <StackPanel DockPanel.Dock="Top">
       <DockPanel Margin="0,0,0,7">
@@ -27,7 +28,7 @@
                   <Button Content="{Binding Title}" Tag="{Binding Url}" Click="Open_Click" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Foreground="#125EAD" FontWeight="SemiBold" Padding="0,4" Margin="0" ToolTip="GitHubで開く">
                     <Button.ContentTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate></Button.ContentTemplate>
                   </Button>
-                  <TextBlock Text="{Binding Summary}" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="#52606D" Margin="0,1,0,4"/>
+                  <DockPanel Margin="0,1,0,4"><Border DockPanel.Dock="Right" CornerRadius="8" Padding="6,2" Margin="6,0,0,0" Background="{Binding Latest, Converter={StaticResource SignalBadge}, ConverterParameter=background}"><TextBlock Text="{Binding Latest.KindLabel}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Latest, Converter={StaticResource SignalBadge}}"/></Border><TextBlock Text="{Binding Summary}" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="#52606D" VerticalAlignment="Center"/></DockPanel>
                   <TextBlock Text="{Binding Preview}" TextWrapping="Wrap" MaxHeight="42" TextTrimming="CharacterEllipsis"/>
                   <WrapPanel Margin="0,7,0,0">
                     <Button Content="GitHubで開く" Tag="{Binding Url}" Click="Open_Click"/>
@@ -38,7 +39,7 @@
                   <Expander Header="{Binding DetailsLabel}" Margin="0,5,0,0" FontSize="12">
                     <ItemsControl ItemsSource="{Binding Signals}"><ItemsControl.ItemTemplate><DataTemplate>
                       <Border BorderBrush="#E3E8ED" BorderThickness="0,1,0,0" Padding="0,7">
-                        <StackPanel><TextBlock FontWeight="SemiBold"><Run Text="{Binding ActorLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding KindLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding TimeLabel, Mode=OneWay}"/></TextBlock><TextBlock Text="{Binding Preview}" TextWrapping="Wrap" Margin="0,3,0,4"/><StackPanel Orientation="Horizontal"><Button Content="コメントを開く" Tag="{Binding Url}" Click="Open_Click"/><Button Content="URLをコピー" Tag="{Binding Url}" Click="Copy_Click"/></StackPanel></StackPanel>
+                        <StackPanel><DockPanel><Border DockPanel.Dock="Right" CornerRadius="8" Padding="6,2" Margin="6,0,0,0" Background="{Binding Converter={StaticResource SignalBadge}, ConverterParameter=background}"><TextBlock Text="{Binding KindLabel}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Converter={StaticResource SignalBadge}}"/></Border><TextBlock FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><Run Text="{Binding ActorLabel, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding TimeLabel, Mode=OneWay}"/></TextBlock></DockPanel><TextBlock Text="{Binding Preview}" TextWrapping="Wrap" Margin="0,3,0,4"/><StackPanel Orientation="Horizontal"><Button Content="コメントを開く" Tag="{Binding Url}" Click="Open_Click"/><Button Content="URLをコピー" Tag="{Binding Url}" Click="Copy_Click"/></StackPanel></StackPanel>
                       </Border>
                     </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                   </Expander>
