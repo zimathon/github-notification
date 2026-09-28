@@ -157,6 +157,7 @@ public struct InboxState: Codable {
     public var cursor: Date?
     public var lastNotifiedRelease: String?
     public var pullRequests: [String: PullRequestInfo] = [:]
+    public var starredThreads: Set<String> = []
     public var signals: [Signal] = []
     public var pending: [String: PendingThread] = [:]
     public var processed: [String: Date] = [:]
@@ -165,11 +166,12 @@ public struct InboxState: Codable {
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case pullRequests, lastNotifiedRelease, enabled, account, cursor, signals, pending, processed, acknowledgedBodyIDs, settings
+        case starredThreads, pullRequests, lastNotifiedRelease, enabled, account, cursor, signals, pending, processed, acknowledgedBodyIDs, settings
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        starredThreads = try values.decodeIfPresent(Set<String>.self, forKey: .starredThreads) ?? []
         enabled = try values.decode(Bool.self, forKey: .enabled)
         account = try values.decodeIfPresent(String.self, forKey: .account)
         cursor = try values.decodeIfPresent(Date.self, forKey: .cursor)
@@ -182,27 +184,40 @@ public struct InboxState: Codable {
         settings = try values.decode(Settings.self, forKey: .settings)
     }
 
-    /// Acknowledge only after the browser accepts the URL. Group rows cover the entire PR.
-    public mutating func openSignal(_ id: String, entireThread: Bool, using opener: (URL) -> Bool) -> [String] {
+    private var acknowledgementHistory: [[Signal]] = []
+    public var canUndoAcknowledgement: Bool { !acknowledgementHistory.isEmpty }
+
+    /// Browser navigation never changes the inbox or its undo history.
+    public func openSignal(_ id: String, entireThread: Bool, using opener: (URL) -> Bool) -> [String] {
         guard let signal = signals.first(where: { $0.id == id }),
-              let url = SignalRules.safeWebURL(signal.url), opener(url) else { return [] }
-        var acknowledged: [String] = []
-        for index in signals.indices where entireThread ? signals[index].threadKey == signal.threadKey : signals[index].id == id {
-            if !signals[index].acknowledged {
-                signals[index].acknowledged = true
-                acknowledged.append(signals[index].id)
-            }
-        }
-        return acknowledged
+              let url = SignalRules.safeWebURL(signal.url) else { return [] }
+        _ = opener(url)
+        return []
+    }
+
+    public mutating func acknowledgeSignals(_ ids: Set<String>) -> [String] {
+        let previous = signals.filter { ids.contains($0.id) && !$0.acknowledged }
+        guard !previous.isEmpty else { return [] }
+        acknowledgementHistory.append(previous)
+        if acknowledgementHistory.count > 20 { acknowledgementHistory.removeFirst() }
+        for index in signals.indices where ids.contains(signals[index].id) { signals[index].acknowledged = true }
+        return previous.map(\.id)
     }
 
     public mutating func acknowledgeThreads(_ keys: Set<String>) -> [String] {
-        var ids: [String] = []
-        for index in signals.indices where keys.contains(signals[index].threadKey) && !signals[index].acknowledged {
-            signals[index].acknowledged = true
-            ids.append(signals[index].id)
+        acknowledgeSignals(Set(signals.filter { keys.contains($0.threadKey) }.map(\.id)))
+    }
+
+    /// Restore only the affected IDs, preserving notifications received since the action.
+    @discardableResult public mutating func undoAcknowledgement() -> Bool {
+        guard let previous = acknowledgementHistory.popLast() else { return false }
+        for signal in previous {
+            if let index = signals.firstIndex(where: { $0.id == signal.id }) { signals[index].acknowledged = false }
+            else { signals.append(signal) } // A sync may have pruned old acknowledged notifications.
+            acknowledgedBodyIDs.remove(signal.id)
         }
-        return ids
+        signals.sort { $0.date > $1.date }
+        return true
     }
 
     public mutating func merge(_ batch: SignalBatch) {
@@ -228,7 +243,7 @@ public struct InboxState: Codable {
         for signal in signals where signal.acknowledged && signal.id.hasPrefix("body:") {
             acknowledgedBodyIDs.insert(signal.id)
         }
-        signals.removeAll { $0.acknowledged && $0.date < cutoff }
+        signals.removeAll { $0.acknowledged && $0.date < cutoff && !starredThreads.contains($0.threadKey) }
         processed = processed.filter { $0.value >= cutoff }
         let retained = Set(signals.map(\.threadKey))
         pullRequests = pullRequests.filter { retained.contains($0.key) }

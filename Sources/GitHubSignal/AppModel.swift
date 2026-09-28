@@ -209,29 +209,36 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func acknowledge(_ id: String) {
-        guard let index = state.signals.firstIndex(where: { $0.id == id }) else { return }
-        state.signals[index].acknowledged = true
-        if persist() { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id]) }
+    func toggleStar(_ key: String) {
+        guard ready else { return }
+        if state.starredThreads.contains(key) { state.starredThreads.remove(key) }
+        else { state.starredThreads.insert(key) }
+        persist()
     }
 
-    func acknowledgeThread(_ threadKey: String) {
-        let ids = state.signals.filter { $0.threadKey == threadKey && !$0.acknowledged }.map(\.id)
-        guard !ids.isEmpty else { return }
-        for index in state.signals.indices where state.signals[index].threadKey == threadKey {
-            state.signals[index].acknowledged = true
-        }
-        if persist() { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids) }
+    func acknowledge(_ id: String) {
+        guard ready else { return }
+        removeAcknowledgedNotifications(state.acknowledgeSignals([id]))
     }
+
+    func acknowledgeThread(_ threadKey: String) { acknowledgeThreads([threadKey]) }
 
     func acknowledgeThreads(_ keys: Set<String>) {
         guard ready else { return }
-        let ids = state.acknowledgeThreads(keys)
-        guard !ids.isEmpty else { return }
-        if persist() {
+        removeAcknowledgedNotifications(state.acknowledgeThreads(keys))
+    }
+
+    private func removeAcknowledgedNotifications(_ ids: [String]) {
+        guard !ids.isEmpty, persist() else { return }
+        if !demo {
             let delivered = pending.isEmpty ? ids + ["inbox-summary"] : ids
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: delivered)
         }
+    }
+
+    func undoAcknowledgement() {
+        guard ready, state.undoAcknowledgement() else { return }
+        persist()
     }
 
     func enterDemo() {
@@ -284,10 +291,7 @@ final class AppModel: ObservableObject {
 
     func open(_ signal: Signal, entireThread: Bool = false) {
         guard ready else { return }
-        let ids = state.openSignal(signal.id, entireThread: entireThread) { NSWorkspace.shared.open($0) }
-        if !ids.isEmpty, persist() {
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
-        }
+        _ = state.openSignal(signal.id, entireThread: entireThread) { NSWorkspace.shared.open($0) }
     }
 
     func copyURL(_ signal: Signal) {

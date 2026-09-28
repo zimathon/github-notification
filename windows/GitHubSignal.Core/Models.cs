@@ -79,6 +79,7 @@ public sealed class InboxState
     public Dictionary<string, DateTimeOffset> Processed { get; set; } = [];
     public string? LastNotifiedRelease { get; set; }
     public Dictionary<string, PullRequestInfo> PullRequests { get; set; } = [];
+    public HashSet<string> StarredThreads { get; set; } = [];
     public HashSet<string> AcknowledgedBodyIds { get; set; } = [];
     [JsonRequired] public Settings Settings { get; set; } = new();
     public void Merge(SignalBatch batch)
@@ -102,26 +103,42 @@ public sealed class InboxState
         }
         Cursor = cursor;
     }
+    private readonly List<List<Signal>> acknowledgementHistory = [];
+    [JsonIgnore] public bool CanUndoAcknowledgement => acknowledgementHistory.Count > 0;
     public void OpenSignal(string id, bool entireThread, Func<Uri, bool> opener)
     {
         var signal = Signals.FirstOrDefault(x => x.Id == id);
-        if (signal is null || Rules.SafeWebUrl(signal.Url) is not { } uri || !opener(uri)) return;
-        foreach (var item in Signals.Where(x => entireThread ? x.ThreadKey == signal.ThreadKey : x.Id == id)) item.Acknowledged = true;
+        if (signal is not null && Rules.SafeWebUrl(signal.Url) is { } uri) opener(uri);
     }
-    public void AcknowledgeThread(string key)
-    {
-        foreach (var signal in Signals.Where(x => x.ThreadKey == key)) signal.Acknowledged = true;
-    }
+    public void AcknowledgeThread(string key) => AcknowledgeThreads([key]);
     public void AcknowledgeThreads(IEnumerable<string> keys)
     {
         var selected = keys.ToHashSet();
+        var previous = Signals.Where(x => selected.Contains(x.ThreadKey) && !x.Acknowledged).Select(x => x with { }).ToList();
+        if (previous.Count == 0) return;
+        acknowledgementHistory.Add(previous);
+        if (acknowledgementHistory.Count > 20) acknowledgementHistory.RemoveAt(0);
         foreach (var signal in Signals.Where(x => selected.Contains(x.ThreadKey))) signal.Acknowledged = true;
+    }
+    public void UndoAcknowledgement()
+    {
+        if (!CanUndoAcknowledgement) return;
+        var previous = acknowledgementHistory[^1];
+        acknowledgementHistory.RemoveAt(acknowledgementHistory.Count - 1);
+        foreach (var signal in previous)
+        {
+            var current = Signals.FirstOrDefault(x => x.Id == signal.Id);
+            if (current is not null) current.Acknowledged = false;
+            else Signals.Add(signal);
+            AcknowledgedBodyIds.Remove(signal.Id);
+        }
+        Signals.Sort((a, b) => b.Date.CompareTo(a.Date));
     }
     public void Prune(DateTimeOffset cutoff)
     {
         foreach (var signal in Signals.Where(x => x.Acknowledged && x.Id.StartsWith("body:", StringComparison.Ordinal)))
             AcknowledgedBodyIds.Add(signal.Id);
-        Signals.RemoveAll(x => x.Acknowledged && x.Date < cutoff);
+        Signals.RemoveAll(x => x.Acknowledged && x.Date < cutoff && !StarredThreads.Contains(x.ThreadKey));
         var retained = Signals.Select(x => x.ThreadKey).ToHashSet();
         foreach (var key in PullRequests.Keys.Where(x => !retained.Contains(x)).ToArray()) PullRequests.Remove(key);
         foreach (var key in Processed.Where(x => x.Value < cutoff).Select(x => x.Key).ToArray()) Processed.Remove(key);

@@ -36,17 +36,19 @@ final class SignalPreviewTests: XCTestCase {
         }
     }
 
-    func testOpeningAcknowledgesOnlyTheRequestedScopeAfterSuccessfulHandoff() {
+    func testOpeningPreservesUnreadStateAfterSuccessfulHandoff() {
         let first = Signal(id: "one", kind: .comment, repository: "org/repo", title: "PR", actor: "other", excerpt: "body", url: "https://github.com/org/repo/pull/1#one", date: Date())
         var second = first; second.id = "two"; second.url = "https://github.com/org/repo/pull/1#two"
         var other = first; other.id = "other"; other.url = "https://github.com/org/repo/pull/2"
         var state = InboxState(); state.signals = [first, second, other]
         XCTAssertTrue(state.openSignal("one", entireThread: true, using: { _ in false }).isEmpty)
         XCTAssertTrue(state.signals.allSatisfy { !$0.acknowledged })
-        XCTAssertEqual(state.openSignal("one", entireThread: false, using: { $0.fragment == "one" }), ["one"])
+        XCTAssertEqual(state.openSignal("one", entireThread: false, using: { $0.fragment == "one" }), [])
         XCTAssertFalse(state.signals[1].acknowledged)
-        XCTAssertEqual(state.openSignal("one", entireThread: true, using: { _ in true }), ["two"])
+        XCTAssertEqual(state.openSignal("one", entireThread: true, using: { _ in true }), [])
         XCTAssertFalse(state.signals[2].acknowledged)
+        XCTAssertTrue(state.signals.allSatisfy { !$0.acknowledged })
+        XCTAssertFalse(state.canUndoAcknowledgement)
         state.signals[2].url = "file:///tmp/test"
         var called = false
         XCTAssertTrue(state.openSignal("other", entireThread: true, using: { _ in called = true; return true }).isEmpty)

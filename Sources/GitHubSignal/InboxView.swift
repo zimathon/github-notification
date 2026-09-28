@@ -7,11 +7,13 @@ struct InboxView: View {
     @AppStorage("backgroundTransparency") private var backgroundTransparency = 0.18
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var editingText: Bool
     @State private var filter = "すべて"
     @State private var search = ""
     @AppStorage("inboxDateRange") private var dateRange = 0
     @State private var settingsOpen = false
     @State private var showAcknowledged = false
+    @State private var starredOnly = false
     @State private var organizationsInput = ""
     @State private var settingsError: String?
     @State private var expandedIDs: Set<String> = []
@@ -22,7 +24,7 @@ struct InboxView: View {
 
     private var visible: [Signal] {
         model.filteredSignals.filter {
-            $0.acknowledged == showAcknowledged && (filter == "すべて" || $0.kind.title == filter)
+            (starredOnly ? model.state.starredThreads.contains($0.threadKey) : $0.acknowledged == showAcknowledged) && (filter == "すべて" || $0.kind.title == filter)
                 && (search.isEmpty || "\($0.title) \($0.repository) \($0.actor) \($0.excerpt)".localizedCaseInsensitiveContains(search))
                 && (organization.isEmpty || owner(of: $0.repository) == organization)
                 && (repository.isEmpty || $0.repository == repository)
@@ -178,14 +180,24 @@ struct InboxView: View {
                         .accessibilityLabel("絞り込みを解除")
                 }
                 Spacer()
-                if !showAcknowledged {
-                    Button("一括確認") { model.acknowledgeThreads(Set(groups.map(\.id))) }
+                Button { starredOnly.toggle() } label: { Image(systemName: starredOnly ? "star.fill" : "star") }
+                    .buttonStyle(.bordered).tint(starredOnly ? .orange : accent)
+                    .help(starredOnly ? "スターの絞り込みを解除" : "スター付きだけ表示")
+                    .accessibilityLabel("スター付きだけ表示")
+                if !showAcknowledged || starredOnly {
+                    Button("一括確認") { editingText = false; model.acknowledgeThreads(Set(groups.map(\.id))) }
                         .buttonStyle(.bordered).disabled(groups.isEmpty || !model.ready)
                         .help("表示中のPR・Issueをすべて確認済みにする")
                         .accessibilityLabel("表示中をすべて確認済みにする")
                 }
-                Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox)
-                TextField("検索", text: $search).textFieldStyle(.roundedBorder).frame(width: 110)
+                Button { editingText = false; model.undoAcknowledgement(); showAcknowledged = false } label: { Image(systemName: "arrow.uturn.backward") }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.ready || !model.state.canUndoAcknowledgement || settingsOpen)
+                    .keyboardShortcut(editingText || settingsOpen ? nil : KeyboardShortcut("z", modifiers: .command))
+                    .help("確認済みを元に戻す（⌘Z）")
+                    .accessibilityLabel("確認済みを元に戻す")
+                Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox).disabled(starredOnly)
+                TextField("検索", text: $search).focused($editingText).textFieldStyle(.roundedBorder).frame(width: 85)
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
                 .id(colorScheme)
             if visible.isEmpty {
@@ -215,10 +227,16 @@ struct InboxView: View {
             if let latest = group.signals.first {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        Button { model.toggleStar(group.id) } label: {
+                            Image(systemName: model.state.starredThreads.contains(group.id) ? "star.fill" : "star")
+                                .foregroundStyle(model.state.starredThreads.contains(group.id) ? Color.orange : Color.secondary)
+                        }.buttonStyle(.plain).disabled(!model.ready)
+                            .help(model.state.starredThreads.contains(group.id) ? "スターを外す" : "スターを付ける")
+                            .accessibilityLabel(model.state.starredThreads.contains(group.id) ? "スターを外す" : "スターを付ける")
                         Text(latest.repository).lineLimit(1)
                         pullRequestBadge(latest)
                         Spacer()
-                        Text(showAcknowledged ? "\(group.signals.count)件" : "未確認 \(group.signals.count)")
+                        Text(group.signals.allSatisfy(\.acknowledged) ? "確認済み" : "未確認 \(group.signals.filter { !$0.acknowledged }.count)")
                         Text(latest.date, style: .relative).fixedSize()
                         Button {
                             if expanded { expandedGroups.remove(group.id) } else { expandedGroups.insert(group.id) }
@@ -253,8 +271,8 @@ struct InboxView: View {
                             Button { model.copyURL(latest) } label: {
                                 Image(systemName: "doc.on.doc")
                             }.help("URLをコピー").accessibilityLabel("URLをコピー")
-                            if !showAcknowledged {
-                                Button("確認済み") { model.acknowledgeThread(group.id) }
+                            if group.signals.contains(where: { !$0.acknowledged }) {
+                                Button("確認済み") { editingText = false; model.acknowledgeThread(group.id) }
                                     .help("このPR・Issueの通知をすべて確認済みにする")
                             }
                         }.buttonStyle(.bordered).controlSize(.small).fixedSize()
@@ -287,7 +305,7 @@ struct InboxView: View {
                 Menu {
                     Button("URLをコピー") { model.copyURL(signal) }
                     if !signal.acknowledged {
-                        Button("確認済みにする") { model.acknowledge(signal.id) }
+                        Button("確認済みにする") { editingText = false; model.acknowledge(signal.id) }
                         Button(snoozed ? "スヌーズ解除" : "1時間後に通知") {
                             if snoozed { model.unsnooze(signal.id) } else { model.snooze(signal.id) }
                         }

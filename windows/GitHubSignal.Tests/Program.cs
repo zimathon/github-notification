@@ -73,11 +73,11 @@ Test("Bulk acknowledgement preserves history and excluded PRs", () => {
     Equal(true, one.Acknowledged); Equal(true, old.Acknowledged); Equal(false, hidden.Acknowledged);
     Equal(3, state.Signals.Count);
 });
-Test("Opening acknowledges the selected scope only on browser success", () => {
+Test("Opening preserves unread state regardless of browser success", () => {
     var state = new InboxState { Signals = [Signal("one"), Signal("two"), Signal("other", "https://github.com/acme/repo/pull/2")] };
     state.OpenSignal("one", true, _ => false); Equal(true, state.Signals.All(x => !x.Acknowledged));
-    state.OpenSignal("one", false, _ => true); Equal(true, state.Signals[0].Acknowledged); Equal(false, state.Signals[1].Acknowledged);
-    state.OpenSignal("one", true, _ => true); Equal(true, state.Signals[1].Acknowledged); Equal(false, state.Signals[2].Acknowledged);
+    state.OpenSignal("one", false, _ => true); Equal(false, state.Signals[0].Acknowledged); Equal(false, state.Signals[1].Acknowledged);
+    state.OpenSignal("one", true, _ => true); Equal(false, state.Signals[1].Acknowledged); Equal(false, state.Signals[2].Acknowledged);
     state.Signals[2] = state.Signals[2] with { Url = "file:///tmp/test" };
     bool called = false; state.OpenSignal("other", true, _ => { called = true; return true; });
     Equal(false, called); Equal(false, state.Signals[2].Acknowledged);
@@ -93,6 +93,44 @@ Test("Merging preserves acknowledgement and new revisions", () => {
     var state = new InboxState(); var original = Signal("comment:1:v1"); original.Acknowledged = true;
     state.Merge([original]); state.Merge([Signal("comment:1:v1"), Signal("comment:1:v2"), Signal("comment:1:v2")]);
     Equal(2, state.Signals.Count); Equal(true, state.Signals.Single(x => x.Id.EndsWith("v1")).Acknowledged);
+});
+Test("Undo restores pruned items, preserves new arrivals and is not persisted", () => {
+    var state = new InboxState(); var old = Signal("body:old:hash"); var other = Signal("other", "https://github.com/acme/repo/pull/2"); other.Acknowledged = true;
+    state.Signals.AddRange([old, other]);
+    state.AcknowledgeThread(old.ThreadKey); state.AcknowledgeThread(old.ThreadKey);
+    state.Prune(now.AddDays(1));
+    var fresh = Signal("new"); state.Merge([fresh]);
+    state.UndoAcknowledgement();
+    Equal(false, state.Signals.Single(x => x.Id == old.Id).Acknowledged);
+    Equal(false, fresh.Acknowledged); Equal(false, state.AcknowledgedBodyIds.Contains(old.Id)); Equal(false, state.CanUndoAcknowledgement);
+    state.AcknowledgeThread(old.ThreadKey);
+    var store = Store(); store.Save(state); Equal(false, store.Load().CanUndoAcknowledgement);
+});
+Test("Missing star data stays compatible and null is rejected", () => {
+    var store = Store();
+    File.WriteAllText(store.Path, "{\"schemaVersion\":1,\"signals\":[],\"settings\":{}}");
+    Equal(0, store.Load().StarredThreads.Count);
+    File.WriteAllText(store.Path, "{\"schemaVersion\":1,\"signals\":[],\"settings\":{},\"starredThreads\":null}");
+    Throws<InvalidDataException>(() => store.Load());
+});
+Test("Stars persist and retain acknowledged threads until unstarred", () => {
+    var kept = Signal("kept") with { Date = now.AddYears(-1) };
+    var removed = Signal("removed", "https://github.com/acme/repo/pull/2") with { Date = now.AddYears(-1) };
+    var state = new InboxState { Signals = [kept, removed] };
+    state.StarredThreads.Add(kept.ThreadKey);
+    state.AcknowledgeThreads([kept.ThreadKey, removed.ThreadKey]); state.Prune(now);
+    Equal(1, state.Signals.Count); Equal("kept", state.Signals[0].Id);
+    var store = Store(); store.Save(state); var restored = store.Load();
+    Equal(true, restored.StarredThreads.Contains(kept.ThreadKey));
+    restored.StarredThreads.Remove(kept.ThreadKey); restored.Prune(now);
+    Equal(0, restored.Signals.Count);
+});
+Test("Undo is bounded and opening does not consume history", () => {
+    var state = new InboxState();
+    for (var i=0; i<21; i++) { var item = Signal($"id:{i}", $"https://github.com/acme/repo/pull/{i+1}"); state.Signals.Add(item); state.AcknowledgeThread(item.ThreadKey); }
+    state.OpenSignal("id:20", true, _ => true);
+    for (var i=0; i<20; i++) state.UndoAcknowledgement();
+    Equal(false, state.CanUndoAcknowledgement); Equal(1, state.Signals.Count(x=>x.Acknowledged)); Equal(true, state.Signals.Single(x=>x.Id=="id:0").Acknowledged);
 });
 Test("Acknowledged body does not revive after pruning", () => {
     var state = new InboxState(); var original = Signal("body:1:hash"); original.Acknowledged = true;

@@ -27,6 +27,9 @@ public sealed record ThreadRow(string Key, List<Signal> Signals, PullRequestInfo
     public string PrLabel => PullRequest?.Label ?? "状態未取得";
     public Visibility PrVisibility => PullRequestInfo.ApiPath(Latest) is null ? Visibility.Collapsed : Visibility.Visible;
     public string PrHelp => PullRequest is null ? "PRの状態を順次取得します" : $"PRの状態 · 最終取得 {PullRequest.CheckedAt.ToLocalTime():g}";
+    public bool Starred { get; init; }
+    public string StarLabel => Starred ? "★" : "☆";
+    public string StarHelp => Starred ? "スターを外す" : "スターを付ける";
     public string DetailsLabel => $"通知の詳細（{Signals.Count}件）";
 }
 
@@ -93,13 +96,15 @@ public partial class MainWindow : Window
         var search = SearchBox.Text.Trim();
         var now = DateTimeOffset.UtcNow;
         int.TryParse((string?)DateFilter.SelectedValue, out var days);
-        // Only show updates in the selected period; opening still acknowledges the whole PR in the engine.
-        var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)))
-            .Where(x => (ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && (repo == "" || x.Repository == repo) &&
-                (kind == "" || x.Signals.Any(s => s.Kind.ToString() == kind && (ShowAcknowledged.IsChecked == true || !s.Acknowledged))) &&
+        // Date filtering changes visibility, not acknowledgement scope.
+        var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)) { Starred = engine.State.StarredThreads.Contains(x.Key) })
+            .Where(x => (StarredOnly.IsChecked == true ? x.Starred : ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && (repo == "" || x.Repository == repo) &&
+                (kind == "" || x.Signals.Any(s => s.Kind.ToString() == kind && (StarredOnly.IsChecked == true || ShowAcknowledged.IsChecked == true || !s.Acknowledged))) &&
                 (search == "" || x.Signals.Any(s => (s.Title + " " + s.Actor + " " + s.Excerpt).Contains(search, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(x => x.Latest.Date).ToList();
         ThreadList.ItemsSource = rows;
+        ShowAcknowledged.IsEnabled = StarredOnly.IsChecked != true;
+        UndoButton.IsEnabled = engine.Ready && engine.State.CanUndoAcknowledgement;
         AcknowledgeAllButton.IsEnabled = engine.Ready && rows.Any(x => x.HasPending);
         EmptyLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -121,6 +126,20 @@ public partial class MainWindow : Window
         if (engine.State.Enabled) engine.Pause();
         else { engine.Mutate(x => x.Enabled = true); await engine.SyncAsync(lifetime); }
     }
+    private void Star_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => {
+        var key = (string)((Button)sender).Tag;
+        if (!x.StarredThreads.Remove(key)) x.StarredThreads.Add(key);
+    });
+    private void Undo_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => x.UndoAcknowledgement());
+    private void Window_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.OriginalSource is System.Windows.Controls.Primitives.TextBoxBase) return;
+        if (e.Key == System.Windows.Input.Key.Z && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control && engine.Ready && engine.State.CanUndoAcknowledgement)
+        {
+            engine.Mutate(x => x.UndoAcknowledgement());
+            e.Handled = true;
+        }
+    }
     private void Acknowledge_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => x.AcknowledgeThread((string)((Button)sender).Tag));
     private void AcknowledgeAll_Click(object sender, RoutedEventArgs e)
     {
@@ -132,9 +151,10 @@ public partial class MainWindow : Window
     });
     private void Open_Click(object sender, RoutedEventArgs e)
     {
+        if (!engine.Ready) return;
         switch (((Button)sender).DataContext) {
-            case ThreadRow row: engine.Mutate(x => x.OpenSignal(row.Latest.Id, true, uri => OpenUrl(uri.AbsoluteUri))); break;
-            case Signal signal: engine.Mutate(x => x.OpenSignal(signal.Id, false, uri => OpenUrl(uri.AbsoluteUri))); break;
+            case ThreadRow row: engine.State.OpenSignal(row.Latest.Id, true, uri => OpenUrl(uri.AbsoluteUri)); break;
+            case Signal signal: engine.State.OpenSignal(signal.Id, false, uri => OpenUrl(uri.AbsoluteUri)); break;
         }
     }
     private void Copy_Click(object sender, RoutedEventArgs e)
@@ -203,6 +223,18 @@ public partial class MainWindow : Window
         SearchBox.Text = "";
         AcknowledgeAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (VisibleThreadCount != 0 || engine.PendingCount != 0) throw new InvalidOperationException("PR acknowledgement failed");
+        UndoButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 1 || engine.PendingCount == 0 || UndoButton.IsEnabled)
+            throw new InvalidOperationException("PR acknowledgement undo failed");
+        UpdateLayout();
+        var star = Descendants(this).OfType<Button>().First(x => Equals(x.Content, "☆"));
+        star.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        StarredOnly.IsChecked = true; StarredOnly.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        AcknowledgeAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 1 || engine.PendingCount != 0) throw new InvalidOperationException("Starred acknowledged PR was hidden");
+        UpdateLayout();
+        Descendants(this).OfType<Button>().First(x => Equals(x.Content, "★")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 0) throw new InvalidOperationException("Star removal filter failed");
     }
     private void CheckSettingsSmoke()
     {
