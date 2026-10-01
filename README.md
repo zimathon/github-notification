@@ -1,6 +1,8 @@
 # GitHub Signal
 
-見逃したくないメンション・レビュー依頼・自分のPRへのコメントを知らせる、Mac・Windows向けの常駐アプリ。
+レビュー依頼をPRごとに整理して、あとで戻れる。
+
+GitHub Signalは、GitHub CLIを使う開発者向けのMac・Windows常駐アプリです。個人宛てのレビュー依頼やメンション、自分のPRへのコメント・レビューをまとめて確認できます。
 
 ![Mac版の通知一覧（サンプルデータ）](docs/images/macos-inbox.png)
 
