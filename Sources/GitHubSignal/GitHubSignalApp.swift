@@ -1,9 +1,43 @@
 import AppKit
+import Carbon
 import SwiftUI
 import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     @MainActor let model = AppModel.shared
+    private var inboxWindow: NSWindow?
+    private var inboxObserver: NSObjectProtocol?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        model.start()
+        inboxObserver = NotificationCenter.default.addObserver(forName: .showSignalInbox, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showInbox() }
+        }
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let loginLaunch = event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+            || event?.paramDescriptor(forKeyword: keyAELaunchedAsLogInItem) != nil
+        if !loginLaunch && !ProcessInfo.processInfo.arguments.contains("--login") { showInbox() }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showInbox()
+        return false
+    }
+
+    private func showInbox() {
+        if inboxWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "GitHub Signal"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: InboxView(model: model))
+            if !window.setFrameUsingName("GitHubSignalInbox") { window.center() }
+            window.setFrameAutosaveName("GitHubSignalInbox")
+            inboxWindow = window
+        }
+        inboxWindow?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         let center = UNUserNotificationCenter.current()
@@ -54,11 +88,6 @@ struct GitHubSignalApp: App {
     @StateObject private var model = AppModel.shared
 
     var body: some Scene {
-        Window("GitHub Signal", id: "inbox") {
-            InboxView(model: model)
-                .task { model.start() }
-        }
-        .defaultSize(width: 420, height: 360)
         MenuBarExtra {
             SignalMenu(model: model)
                 .task { model.start() }
@@ -71,7 +100,6 @@ struct GitHubSignalApp: App {
 
 private struct SignalMenu: View {
     @ObservedObject var model: AppModel
-    @Environment(\.openWindow) private var openWindow
     var body: some View {
         Button("未確認 \(model.pendingThreadCount)件を開く") { showInbox() }
         if let account = model.state.account { Text("@\(account)") }
@@ -89,12 +117,9 @@ private struct SignalMenu: View {
         }.disabled(model.checkingUpdate || model.demo)
         if let status = model.updateStatus { Text(status) }
         Button("終了") { NSApplication.shared.terminate(nil) }.keyboardShortcut("q")
-        // The menu remains mounted when the inbox window is closed.
         Text("GitHub Signal v" + model.appVersion)
-            .onReceive(NotificationCenter.default.publisher(for: .showSignalInbox)) { _ in showInbox() }
     }
     private func showInbox() {
-        openWindow(id: "inbox")
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        NotificationCenter.default.post(name: .showSignalInbox, object: nil)
     }
 }

@@ -239,7 +239,7 @@ public partial class MainWindow : Window
     private void CheckSettingsSmoke()
     {
         var settings = new SettingsWindow(engine.State.Settings, Version, true) { Owner = this };
-        settings.Show(); settings.UpdateLayout(); settings.Close();
+        settings.Show(); settings.UpdateLayout(); settings.CheckInvalidInput(); settings.Close();
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {

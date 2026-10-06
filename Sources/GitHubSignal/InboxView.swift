@@ -4,6 +4,7 @@ import NotificationCore
 
 struct InboxView: View {
     @ObservedObject var model: AppModel
+    @StateObject private var loginStartup = LoginStartup()
     @AppStorage("backgroundTransparency") private var backgroundTransparency = 0.18
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
@@ -439,6 +440,17 @@ struct InboxView: View {
                 Text("なし").tag(0); Text("15分").tag(15); Text("30分").tag(30); Text("1時間").tag(60)
             }
             Toggle("Botからの更新も通知する", isOn: Binding(get: { model.state.settings.includeBots }, set: { value in model.updateSettings { $0.includeBots = value } }))
+            Toggle("ログイン時に起動", isOn: Binding(get: { loginStartup.enabled }, set: { loginStartup.setEnabled($0) }))
+                .disabled(model.demo)
+            if loginStartup.requiresApproval {
+                HStack {
+                    Text("macOSのログイン項目で許可してください。")
+                    Button("ログイン項目を開く") { loginStartup.openSettings() }
+                }.font(.system(size: 12))
+            }
+            if let error = loginStartup.error { Text(error).font(.system(size: 12)).foregroundStyle(.orange) }
+            Text("自動起動時はメニューバーに常駐します。通知の開始・停止は前回の状態を引き継ぎます。")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
             Text("ウィンドウを閉じても通知は届きます。スリープ中やアプリ終了中は停止します。")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             HStack {
@@ -447,7 +459,8 @@ struct InboxView: View {
                 Button("完了") { settingsOpen = false }.keyboardShortcut(.defaultAction)
             }
         }.font(.system(size: 13)).controlSize(.small).padding(12).frame(width: 390)
-            .onAppear { organizationsInput = model.state.settings.organizations.joined(separator: ", "); settingsError = nil }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in loginStartup.refresh() }
+            .onAppear { loginStartup.refresh(); organizationsInput = model.state.settings.organizations.joined(separator: ", "); settingsError = nil }
     }
 
     private func banner(_ text: String, symbol: String, color: Color) -> some View {

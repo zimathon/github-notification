@@ -10,6 +10,7 @@ internal sealed class SettingsWindow : Window
 {
     public Settings Result { get; private set; }
     public event Action? TestRequested;
+    internal Action CheckInvalidInput { get; }
     public SettingsWindow(Settings current, string version, bool demo)
     {
         Result = current;
@@ -34,6 +35,16 @@ internal sealed class SettingsWindow : Window
         Label("Windowsの通知設定や応答不可モードにより、通知が表示されない場合があります。");
         Label($"バージョン {version}\n起動元：{AppContext.BaseDirectory}");
         var error = new TextBlock { Foreground = System.Windows.Media.Brushes.Firebrick, TextWrapping = TextWrapping.Wrap }; panel.Children.Add(error);
+        var startup = new CheckBox { Content = "ログイン時に起動", IsEnabled = !demo, Margin = new Thickness(0, 10, 0, 0) };
+        panel.Children.Add(startup);
+        bool startupReadable = false;
+        if (!demo) {
+            try { startup.IsChecked = LoginStartup.Current.IsRegistered(); startupReadable = true; }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or System.Security.SecurityException) {
+                startup.IsEnabled = false; error.Text = "自動起動の設定を読み込めません：" + exception.Message;
+            }
+        }
+        Label("自動起動時はトレイに常駐します。通知の開始・停止は前回の状態を引き継ぎます。Windowsのスタートアップ設定でも有効にしてください。アプリを移動した場合は、移動先でこの設定を保存し直してください。");
         var save = new Button { Content = "保存", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; panel.Children.Add(save);
         save.Click += (_, _) => {
             try {
@@ -41,8 +52,17 @@ internal sealed class SettingsWindow : Window
                 if (!int.TryParse(reminder.Text, out int minutes) || minutes < 0 || minutes > 1440) throw new InvalidDataException("再通知は0〜1440分で入力してください。");
                 Result = new Settings { Organizations = Settings.ParseOrganizations(owners.Text), PollSeconds = seconds, ReminderMinutes = minutes, IncludeBots = bots.IsChecked == true,
                     ViewOrganization = current.ViewOrganization, ViewRepository = current.ViewRepository, ViewDays = current.ViewDays };
+                if (startupReadable) LoginStartup.Current.SetEnabled(startup.IsChecked == true);
                 DialogResult = true;
-            } catch (InvalidDataException exception) { error.Text = exception.Message; }
+            } catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or System.Security.SecurityException) { error.Text = exception.Message; }
+        };
+        CheckInvalidInput = () => {
+            void Check(string interval, string organizations) {
+                poll.Text = interval; owners.Text = organizations; error.Text = "";
+                save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                if (string.IsNullOrEmpty(error.Text) || !IsVisible) throw new InvalidOperationException("Invalid settings must show an error and keep the dialog open");
+            }
+            Check("abc", ""); Check("50", ""); Check("120", "https://github.com/example");
         };
     }
 }

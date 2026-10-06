@@ -31,6 +31,12 @@ jobs:
             if (Test-Path "dist/windows-x64/smoke-error.txt") { Get-Content "dist/windows-x64/smoke-error.txt" }
             throw "WPF smoke test failed: $($process.ExitCode)"
           }
+      - name: Background login startup smoke test
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/windows-x64/GitHubSignal.exe" -ArgumentList "--smoke-test", "--login" -PassThru
+          if (-not $process.WaitForExit(30000)) { $process.Kill(); throw "Login startup smoke test timed out" }
+          if ($process.ExitCode -ne 0) { throw "Login startup smoke test failed: $($process.ExitCode)" }
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: GitHubSignal-windows-x64

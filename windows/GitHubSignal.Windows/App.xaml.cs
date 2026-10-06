@@ -20,11 +20,12 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        bool login = e.Args.Contains("--login");
         bool smoke = e.Args.Contains("--smoke-test");
         bool demo = smoke || e.Args.Contains("--demo");
         if (!demo) {
             singleInstance = new Mutex(true, "Local\\GitHubSignal.Windows", out ownsMutex);
-            if (!ownsMutex) { MessageBox.Show("GitHub Signalは起動済みです。タスクトレイのアイコンから開いてください。", "GitHub Signal"); Shutdown(); return; }
+            if (!ownsMutex) { if (!login) MessageBox.Show("GitHub Signalは起動済みです。タスクトレイのアイコンから開いてください。", "GitHub Signal"); Shutdown(); return; }
         }
         string folder = demo ? Path.Combine(Path.GetTempPath(), "GitHubSignal-demo-" + Guid.NewGuid()) :
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GitHubSignal");
@@ -66,6 +67,7 @@ public partial class App : Application
                     window.UpdateLayout();
                     if (window.VisibleThreadCount != 1 || engine.PendingCount != 1) throw new InvalidOperationException("PR grouping smoke test failed");
                     window.CheckSmokeBindings();
+                    LoginStartup.CheckSmoke();
                     using (var smokeTray = new TrayService(() => { }, () => { })) {
                         smokeTray.SetCount(1); smokeTray.SetCount(99); smokeTray.SetCount(100); smokeTray.SetCount(0);
                     }
@@ -76,7 +78,12 @@ public partial class App : Application
                 }
             }, DispatcherPriority.ApplicationIdle);
         }
-        window.Show();
+        if (!login) window.Show();
+        else if (smoke) {
+            if (window.IsVisible) throw new InvalidOperationException("Login startup must keep the inbox hidden");
+            // Exercise the same entry point as clicking the tray after a background launch.
+            window.ShowInbox();
+        }
         // Demo never starts polling, update requests or native notifications; its temporary state is disposable.
         if (demo) Exit += (_, _) => { if (Directory.Exists(folder)) Directory.Delete(folder, true); };
     }
