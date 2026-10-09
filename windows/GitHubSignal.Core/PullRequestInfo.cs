@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace GitHubSignal.Core;
 
-public sealed record PullRequestInfo(string? Status, DateTimeOffset CheckedAt)
+public sealed record PullRequestInfo(string? Status, DateTimeOffset CheckedAt, string? Author = null)
 {
     [System.Text.Json.Serialization.JsonIgnore]
     public string Label => Status switch { "open" => "🟢 Open", "draft" => "⚪ Draft", "merged" => "🟣 マージ済み", "closed" => "🔴 クローズ", _ => "状態未取得" };
@@ -11,7 +11,8 @@ public sealed record PullRequestInfo(string? Status, DateTimeOffset CheckedAt)
         var state = value.TryGetProperty("state", out var s) ? s.GetString() : null;
         bool merged = value.TryGetProperty("merged", out var m) && m.ValueKind == JsonValueKind.True;
         bool draft = value.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True;
-        return new(merged ? "merged" : state == "closed" ? "closed" : state == "open" ? (draft ? "draft" : "open") : null, DateTimeOffset.UtcNow);
+        var author = value.TryGetProperty("user", out var user) && user.ValueKind == JsonValueKind.Object && user.TryGetProperty("login", out var login) ? login.GetString() : null;
+        return new(merged ? "merged" : state == "closed" ? "closed" : state == "open" ? (draft ? "draft" : "open") : null, DateTimeOffset.UtcNow, author);
     }
     public static string? ApiPath(Signal signal) {
         if (Rules.SafeWebUrl(signal.Url) is not { } url || url.Host != "github.com") return null;

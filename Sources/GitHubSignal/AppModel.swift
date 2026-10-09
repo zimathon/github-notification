@@ -192,9 +192,14 @@ final class AppModel: ObservableObject {
 
     private func refreshPullRequests() async {
         let now = Date()
-        let grouped = Dictionary(grouping: pending.filter { PullRequestInfo.apiPath(for: $0) != nil }, by: \.threadKey)
+        let grouped = Dictionary(grouping: filteredSignals.filter {
+            (!$0.acknowledged || state.pullRequests[$0.threadKey]?.author?.isEmpty != false)
+                && PullRequestInfo.apiPath(for: $0) != nil
+        }, by: \.threadKey)
         func lastAttempt(_ key: String) -> Date {
-            max(pullRequestAttempts[key] ?? .distantPast, state.pullRequests[key]?.checkedAt ?? .distantPast)
+            let info = state.pullRequests[key]
+            let checkedAt = info?.author?.isEmpty == false ? info?.checkedAt : nil
+            return max(pullRequestAttempts[key] ?? .distantPast, checkedAt ?? .distantPast)
         }
         let keys = grouped.keys.filter { now.timeIntervalSince(lastAttempt($0)) >= 900 || lastAttempt($0) > now }
             .sorted { lastAttempt($0) == lastAttempt($1) ? (grouped[$0]?.first?.date ?? .distantPast) > (grouped[$1]?.first?.date ?? .distantPast) : lastAttempt($0) < lastAttempt($1) }

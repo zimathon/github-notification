@@ -11,6 +11,7 @@ struct InboxView: View {
     @FocusState private var editingText: Bool
     @State private var filter = "すべて"
     @State private var search = ""
+    @AppStorage("inboxAuthorFilter") private var authorFilter = "all"
     @AppStorage("inboxDateRange") private var dateRange = 0
     @State private var settingsOpen = false
     @State private var showAcknowledged = false
@@ -29,6 +30,7 @@ struct InboxView: View {
                 && (search.isEmpty || "\($0.title) \($0.repository) \($0.actor) \($0.excerpt)".localizedCaseInsensitiveContains(search))
                 && (organization.isEmpty || owner(of: $0.repository) == organization)
                 && (repository.isEmpty || $0.repository == repository)
+                && (PullRequestAuthorFilter(rawValue: authorFilter) ?? .all).includes($0, info: model.state.pullRequests[$0.threadKey], account: model.state.account)
                 && (SignalDateRange(rawValue: dateRange) ?? .all).includes($0.date)
         }
     }
@@ -61,6 +63,12 @@ struct InboxView: View {
             else { indices[key] = result.count; result.append(SignalGroup(id: key, signals: [signal])) }
         }
         return result
+    }
+
+    private var visibleMergedThreadKeys: Set<String> {
+        Set(groups.filter {
+            model.state.pullRequests[$0.id]?.status == "merged" && $0.signals.contains { !$0.acknowledged }
+        }.map(\.id))
     }
 
     var body: some View {
@@ -174,12 +182,26 @@ struct InboxView: View {
                 // until something else rebuilds them. Rebuild them on the switch.
                 .id(colorScheme)
             HStack(spacing: 6) {
+                Picker("PR作成者", selection: $authorFilter) {
+                    ForEach(PullRequestAuthorFilter.allCases, id: \.rawValue) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }.labelsHidden().frame(width: 110).help("PRの作成者で絞り込み（作成者未取得のPR・Issueは「すべて」で表示）")
                 Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
-                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 {
-                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0 } label: { Image(systemName: "xmark.circle") }
+                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" {
+                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all" } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("絞り込みを解除")
                         .accessibilityLabel("絞り込みを解除")
                 }
+                Spacer()
+                Button("マージ済みをクリア") {
+                    editingText = false
+                    model.acknowledgeThreads(visibleMergedThreadKeys)
+                }.buttonStyle(.bordered).disabled(!model.ready || visibleMergedThreadKeys.isEmpty)
+                    .help("表示中のマージ済みPRの通知をすべて確認済みにする（⌘Zで取り消し）")
+            }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
+                .id(colorScheme)
+            HStack(spacing: 6) {
                 Spacer()
                 Button { starredOnly.toggle() } label: { Image(systemName: starredOnly ? "star.fill" : "star") }
                     .buttonStyle(.bordered).tint(starredOnly ? .orange : accent)

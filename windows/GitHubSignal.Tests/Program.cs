@@ -245,6 +245,7 @@ Async("PR state updates without new signals and preserves acknowledgement", asyn
         Equal(0, batch.Signals.Count); state.Merge(batch);
         var store = Store(); store.Save(state); var restored = store.Load();
         Equal(item.Expected, restored.PullRequests[existing.ThreadKey].Status);
+        Equal("zimathon", restored.PullRequests[existing.ThreadKey].Author);
         Equal(true, restored.Signals[0].Acknowledged); Equal(1, restored.Signals.Count);
     }
 });
@@ -267,7 +268,7 @@ Async("Failed pending and future cache do not block healthy PR refresh", async (
     var state = new InboxState { Enabled = true, Signals = [signal] };
     var bad = Thread("bad") with { Subject = new("bad", "https://evil.test/repos/acme/repo/pulls/2", "PullRequest") };
     state.Pending[bad.Id] = new(bad, now.AddDays(-1));
-    state.PullRequests[signal.ThreadKey] = new("open", DateTimeOffset.UtcNow.AddDays(1));
+    state.PullRequests[signal.ThreadKey] = new("open", DateTimeOffset.UtcNow.AddDays(1), "zimathon");
     store.Save(state);
     var fake = new Fake((path, _) => Task.FromResult(Response(path == "/user" ? "{\"login\":\"zimathon\"}" : path.StartsWith("/notifications") ? "[]" : "{\"state\":\"closed\",\"merged\":true}")));
     await new InboxEngine(store, fake).SyncAsync();
@@ -277,6 +278,44 @@ Async("Failed pending and future cache do not block healthy PR refresh", async (
     var malformed = new Fake((path, _) => Task.FromResult(Response(path == "/user" ? "{\"login\":\"zimathon\"}" : path.StartsWith("/notifications") ? "[]" : "{}")));
     await new InboxEngine(store, malformed).SyncAsync();
     Equal("merged", store.Load().PullRequests[signal.ThreadKey].Status);
+});
+Test("Author filters use the PR creator and handle unknown metadata", () => {
+    var signal = Signal("comment");
+    var mine = new PullRequestInfo("open", now, "ZIMATHON");
+    var other = new PullRequestInfo("merged", now, "teammate");
+    foreach (var (info, own) in new[] { (mine, true), (other, false) }) {
+        Equal(own, PullRequestAuthorFilter.Includes(signal, info, "zimathon", "mine"));
+        Equal(!own, PullRequestAuthorFilter.Includes(signal, info, "zimathon", "others"));
+    }
+    foreach (var (item, info, account) in new (Signal, PullRequestInfo?, string?)[] {
+        (signal, null, "zimathon"), (signal, new("open", now), "zimathon"),
+        (signal, other, null), (signal, other, ""), (Signal("issue", "https://github.com/acme/repo/issues/1"), other, "zimathon")
+    }) {
+        Equal(true, PullRequestAuthorFilter.Includes(item, info, account, "all"));
+        Equal(false, PullRequestAuthorFilter.Includes(item, info, account, "mine"));
+        Equal(false, PullRequestAuthorFilter.Includes(item, info, account, "others"));
+    }
+    var old = Json.Read<PullRequestInfo>("{\"status\":\"open\",\"checkedAt\":\"2026-09-18T09:00:00Z\"}");
+    Equal<string?>(null, old.Author); Equal("open", old.Status);
+    Equal("all", Json.Read<Settings>("{}").ViewAuthorFilter);
+    Equal("mine", Json.Read<Settings>(JsonSerializer.Serialize(new Settings { ViewAuthorFilter = "mine" }, Json.Options)).ViewAuthorFilter);
+});
+Async("Author backfill includes acknowledged PRs without changing acknowledgement", async () => {
+    var store = Store(); var signal = Signal("old"); signal.Acknowledged = true;
+    var state = new InboxState { Enabled = true, Signals = [signal], StarredThreads = [signal.ThreadKey] };
+    state.PullRequests[signal.ThreadKey] = new("open", DateTimeOffset.UtcNow);
+    store.Save(state);
+    var fake = new Fake((path, _) => Task.FromResult(Response(path == "/user" ? "{\"login\":\"zimathon\"}" : path.StartsWith("/notifications") ? "[]" : "{\"state\":\"open\",\"user\":{\"login\":\"zimathon\"}}")));
+    var engine = new InboxEngine(store, fake); await engine.SyncAsync();
+    var restored = store.Load();
+    Equal("zimathon", restored.PullRequests[signal.ThreadKey].Author);
+    Equal(true, restored.Signals[0].Acknowledged); Equal(true, restored.StarredThreads.Contains(signal.ThreadKey));
+    Equal(1, fake.Paths.Count(x => x.StartsWith("/repos/")));
+    restored.PullRequests[signal.ThreadKey] = restored.PullRequests[signal.ThreadKey] with { CheckedAt = DateTimeOffset.UtcNow.AddHours(-1) };
+    store.Save(restored);
+    await new InboxEngine(store, fake).SyncAsync();
+    Equal(2, fake.Paths.Count(x => x == "/user"));
+    Equal(1, fake.Paths.Count(x => x.StartsWith("/repos/")));
 });
 int failures = 0;
 try {

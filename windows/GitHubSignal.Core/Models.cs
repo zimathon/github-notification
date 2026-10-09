@@ -50,6 +50,7 @@ public sealed class Settings
     public List<string> Organizations { get; set; } = [];
     public string ViewOrganization { get; set; } = "";
     public string ViewRepository { get; set; } = "";
+    public string ViewAuthorFilter { get; set; } = "all";
     public int ViewDays { get; set; }
     public bool Includes(string repository) => Organizations.Count == 0 ||
         Organizations.Contains(repository.Split('/')[0], StringComparer.OrdinalIgnoreCase);
