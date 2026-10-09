@@ -2,10 +2,12 @@ import Foundation
 
 public struct PullRequestInfo: Codable, Equatable {
     public var status: String?
+    public var author: String?
     public var checkedAt: Date
 
-    public init(state: String?, draft: Bool?, merged: Bool?, checkedAt: Date = Date()) {
+    public init(state: String?, draft: Bool?, merged: Bool?, author: String? = nil, checkedAt: Date = Date()) {
         status = merged == true ? "merged" : state == "closed" ? "closed" : state == "open" ? (draft == true ? "draft" : "open") : nil
+        self.author = author
         self.checkedAt = checkedAt
     }
 

@@ -47,6 +47,8 @@ public partial class MainWindow : Window
     public event Action? TestNotificationRequested;
     public event Func<string, bool>? UpdateNotificationRequested;
     public int VisibleThreadCount => ThreadList.Items.Count;
+    private string[] VisibleMergedThreadKeys => ThreadList.Items.Cast<ThreadRow>()
+        .Where(x => x.PullRequest?.Status == "merged" && x.HasPending).Select(x => x.Key).ToArray();
     public MainWindow(InboxEngine engine, bool demo, CancellationToken lifetime)
     {
         this.engine = engine; this.demo = demo; this.lifetime = lifetime;
@@ -54,6 +56,8 @@ public partial class MainWindow : Window
         refreshing = true;
         KindFilter.ItemsSource = new[] { new FilterOption("", "種類：すべて") }.Concat(Enum.GetValues<SignalKind>().Select(x => new FilterOption(x.ToString(), Rules.Label(x))));
         KindFilter.SelectedValue = "";
+        AuthorFilter.ItemsSource = new[] { new FilterOption("all", "作成者：すべて"), new FilterOption("mine", "自分のPR"), new FilterOption("others", "他者のPR") };
+        AuthorFilter.SelectedValue = engine.State.Settings.ViewAuthorFilter is "mine" or "others" ? engine.State.Settings.ViewAuthorFilter : "all";
         DateFilter.ItemsSource = new[] { new FilterOption("0", "全期間"), new FilterOption("1", "今日"), new FilterOption("7", "過去7日"), new FilterOption("30", "過去30日") };
         DateFilter.SelectedValue = engine.State.Settings.ViewDays is 1 or 7 or 30 ? engine.State.Settings.ViewDays.ToString() : "0";
         refreshing = false;
@@ -93,11 +97,13 @@ public partial class MainWindow : Window
         var owner = (string?)OwnerFilter.SelectedValue ?? "";
         var repo = (string?)RepositoryFilter.SelectedValue ?? "";
         var kind = (string?)KindFilter.SelectedValue ?? "";
+        var authorFilter = (string?)AuthorFilter.SelectedValue ?? "all";
         var search = SearchBox.Text.Trim();
         var now = DateTimeOffset.UtcNow;
         int.TryParse((string?)DateFilter.SelectedValue, out var days);
         // Date filtering changes visibility, not acknowledgement scope.
         var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)) { Starred = engine.State.StarredThreads.Contains(x.Key) })
+            .Where(x => PullRequestAuthorFilter.Includes(x.Latest, x.PullRequest, engine.State.Account, authorFilter))
             .Where(x => (StarredOnly.IsChecked == true ? x.Starred : ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && (repo == "" || x.Repository == repo) &&
                 (kind == "" || x.Signals.Any(s => s.Kind.ToString() == kind && (StarredOnly.IsChecked == true || ShowAcknowledged.IsChecked == true || !s.Acknowledged))) &&
                 (search == "" || x.Signals.Any(s => (s.Title + " " + s.Actor + " " + s.Excerpt).Contains(search, StringComparison.OrdinalIgnoreCase))))
@@ -106,6 +112,7 @@ public partial class MainWindow : Window
         ShowAcknowledged.IsEnabled = StarredOnly.IsChecked != true;
         UndoButton.IsEnabled = engine.Ready && engine.State.CanUndoAcknowledgement;
         AcknowledgeAllButton.IsEnabled = engine.Ready && rows.Any(x => x.HasPending);
+        ClearMergedButton.IsEnabled = engine.Ready && VisibleMergedThreadKeys.Length > 0;
         EmptyLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     private void Owner_Changed(object sender, SelectionChangedEventArgs e)
@@ -118,6 +125,7 @@ public partial class MainWindow : Window
         if (refreshing || !IsInitialized) return;
         if (ReferenceEquals(sender, RepositoryFilter)) engine.Mutate(x => x.Settings.ViewRepository = (string?)RepositoryFilter.SelectedValue ?? "");
         else if (ReferenceEquals(sender, DateFilter)) engine.Mutate(x => x.Settings.ViewDays = int.TryParse((string?)DateFilter.SelectedValue, out var days) ? days : 0);
+        else if (ReferenceEquals(sender, AuthorFilter)) engine.Mutate(x => x.Settings.ViewAuthorFilter = (string?)AuthorFilter.SelectedValue ?? "all");
         else RenderThreads();
     }
     private void Search_Changed(object sender, TextChangedEventArgs e) => RenderThreads();
@@ -144,6 +152,11 @@ public partial class MainWindow : Window
     private void AcknowledgeAll_Click(object sender, RoutedEventArgs e)
     {
         var keys = ThreadList.Items.Cast<ThreadRow>().Select(x => x.Key).ToArray();
+        engine.Mutate(x => x.AcknowledgeThreads(keys));
+    }
+    private void ClearMerged_Click(object sender, RoutedEventArgs e)
+    {
+        var keys = VisibleMergedThreadKeys;
         engine.Mutate(x => x.AcknowledgeThreads(keys));
     }
     private void Snooze_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => {
@@ -218,9 +231,18 @@ public partial class MainWindow : Window
         if (VisibleThreadCount != 1 || engine.State.Settings.ViewDays != 7) throw new InvalidOperationException("Date filter binding failed");
         DateFilter.SelectedValue = "0";
         engine.Mutate(x => x.Signals.Remove(oldSignal));
+        engine.Mutate(x => { x.Account = "you"; x.PullRequests[x.Signals[0].ThreadKey] = new("open", DateTimeOffset.UtcNow, x.Account); });
+        AuthorFilter.SelectedValue = "mine";
+        if (VisibleThreadCount != 1 || engine.State.Settings.ViewAuthorFilter != "mine") throw new InvalidOperationException("Own PR filter failed");
+        AuthorFilter.SelectedValue = "others";
+        if (VisibleThreadCount != 0) throw new InvalidOperationException("Other PR filter failed");
+        engine.Mutate(x => x.PullRequests[x.Signals[0].ThreadKey] = new("open", DateTimeOffset.UtcNow, "someone-else"));
+        if (VisibleThreadCount != 1) throw new InvalidOperationException("Other PR metadata refresh failed");
+        AuthorFilter.SelectedValue = "all";
         SearchBox.Text = "nothing-matches";
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Search filter failed");
         SearchBox.Text = "";
+        CheckClearMergedSmoke();
         AcknowledgeAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (VisibleThreadCount != 0 || engine.PendingCount != 0) throw new InvalidOperationException("PR acknowledgement failed");
         UndoButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -235,6 +257,32 @@ public partial class MainWindow : Window
         UpdateLayout();
         Descendants(this).OfType<Button>().First(x => Equals(x.Content, "★")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Star removal filter failed");
+    }
+    private void CheckClearMergedSmoke()
+    {
+        var original = engine.State.Signals[0];
+        var open = original with { Id = "open-clear-smoke", Url = "https://github.com/octo-org/example/pull/2" };
+        var hidden = original with { Id = "hidden-clear-smoke", Url = "https://github.com/octo-org/example/pull/3", Title = "対象外" };
+        engine.Mutate(x => {
+            x.Signals.Add(open); x.Signals.Add(hidden);
+            x.PullRequests[original.ThreadKey] = new("merged", DateTimeOffset.UtcNow);
+            x.PullRequests[open.ThreadKey] = new("open", DateTimeOffset.UtcNow);
+            x.PullRequests[hidden.ThreadKey] = new("merged", DateTimeOffset.UtcNow);
+        });
+        SearchBox.Text = original.Title;
+        if (VisibleThreadCount != 2 || !ClearMergedButton.IsEnabled) throw new InvalidOperationException("Merged clear selection failed");
+        ClearMergedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 1 || engine.PendingCount != 2 || open.Acknowledged || hidden.Acknowledged || ClearMergedButton.IsEnabled)
+            throw new InvalidOperationException("Merged clear must preserve open and filtered-out PRs");
+        UndoButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 2 || engine.PendingCount != 3) throw new InvalidOperationException("Merged clear undo failed");
+        engine.Mutate(x => {
+            x.Signals.Remove(open); x.Signals.Remove(hidden);
+            x.PullRequests.Remove(open.ThreadKey); x.PullRequests.Remove(hidden.ThreadKey);
+            x.PullRequests[original.ThreadKey] = new("open", DateTimeOffset.UtcNow);
+        });
+        SearchBox.Text = "";
+        if (ClearMergedButton.IsEnabled) throw new InvalidOperationException("Merged clear must be disabled without merged PRs");
     }
     private void CheckSettingsSmoke()
     {

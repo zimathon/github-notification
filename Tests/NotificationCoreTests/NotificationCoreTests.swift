@@ -225,6 +225,7 @@ final class NotificationCoreTests: XCTestCase {
             state.merge(batch)
             let restored = try JSONDecoder().decode(InboxState.self, from: JSONEncoder().encode(state))
             XCTAssertEqual(restored.pullRequests[saved.threadKey]?.status, expected)
+            XCTAssertEqual(restored.pullRequests[saved.threadKey]?.author, "me")
             XCTAssertTrue(restored.signals[0].acknowledged)
             XCTAssertEqual(restored.signals.count, 1)
             state.merge(SignalBatch(signals: [], threadKey: saved.threadKey, pullRequest: PullRequestInfo(state: nil, draft: nil, merged: nil)))

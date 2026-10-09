@@ -117,10 +117,11 @@ public sealed class InboxEngine
         var now = DateTimeOffset.UtcNow;
         DateTimeOffset LastAttempt(string key) {
             var attempt = pullRequestAttempts.GetValueOrDefault(key);
-            var check = State.PullRequests.GetValueOrDefault(key)?.CheckedAt ?? DateTimeOffset.MinValue;
+            var info = State.PullRequests.GetValueOrDefault(key);
+            var check = string.IsNullOrEmpty(info?.Author) ? DateTimeOffset.MinValue : info.CheckedAt;
             return attempt > check ? attempt : check;
         }
-        var candidates = Included.Where(x => !x.Acknowledged && PullRequestInfo.ApiPath(x) is not null)
+        var candidates = Included.Where(x => (!x.Acknowledged || string.IsNullOrEmpty(State.PullRequests.GetValueOrDefault(x.ThreadKey)?.Author)) && PullRequestInfo.ApiPath(x) is not null)
             .GroupBy(x => x.ThreadKey).Where(x => now - LastAttempt(x.Key) >= TimeSpan.FromMinutes(15) || LastAttempt(x.Key) > now)
             .OrderBy(x => LastAttempt(x.Key)).ThenByDescending(x => x.Max(s => s.Date)).ThenBy(x => x.Key).Take(3).Select(x => x.First()).ToArray();
         foreach (var signal in candidates) {

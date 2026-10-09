@@ -71,7 +71,7 @@ public struct GitHubClient {
         guard let path = PullRequestInfo.apiPath(for: signal) else { throw SignalError.message("PRのURLを確認できませんでした。") }
         let response = try await transport.get(path)
         let subject = try JSONCoding.decoder().decode(Subject.self, from: response.data)
-        let info = PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged)
+        let info = PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged, author: subject.user.login)
         guard info.status != nil else { throw SignalError.message("PRの状態を取得できませんでした。") }
         return info
     }
@@ -140,7 +140,7 @@ public struct GitHubClient {
             }
         }
         let key = Signal(id: "", kind: .review, repository: thread.repository.fullName, title: "", actor: "", excerpt: "", url: subject.htmlUrl, date: Date()).threadKey
-        return SignalBatch(signals: result, threadKey: key, pullRequest: isPR ? PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged) : nil)
+        return SignalBatch(signals: result, threadKey: key, pullRequest: isPR ? PullRequestInfo(state: subject.state, draft: subject.draft, merged: subject.merged, author: subject.user.login) : nil)
     }
 }
 
