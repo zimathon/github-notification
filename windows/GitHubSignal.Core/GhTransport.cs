@@ -12,7 +12,7 @@ public sealed record ApiResponse(string Body, Dictionary<string, string> Headers
 }
 public interface IGitHubTransport { Task<ApiResponse> GetAsync(string path, CancellationToken cancellation = default); }
 
-public sealed class GhTransport : IGitHubTransport
+public sealed class GhTransport : IGitHubTransport, IReviewCommentTransport
 {
     public static string FindExecutable()
     {
@@ -24,7 +24,13 @@ public sealed class GhTransport : IGitHubTransport
         return candidates.FirstOrDefault(File.Exists) ?? throw new FileNotFoundException(
             "GitHub CLIが見つかりません。PowerShellで winget install --id GitHub.cli -e を実行してください。");
     }
-    public async Task<ApiResponse> GetAsync(string path, CancellationToken cancellation = default)
+    public Task<ApiResponse> GetAsync(string path, CancellationToken cancellation = default) => RequestAsync(path, null, cancellation);
+    public Task<ApiResponse> PostCommentAsync(string path, string body, CancellationToken cancellation = default)
+    {
+        if (!BotReviewRequest.IsCommentPath(path)) throw new InvalidDataException("レビュー依頼先が正しくありません。");
+        return RequestAsync(path, System.Text.Json.JsonSerializer.Serialize(new { body }), cancellation);
+    }
+    private async Task<ApiResponse> RequestAsync(string path, string? payload, CancellationToken cancellation)
     {
         if (!path.StartsWith('/') || path.StartsWith("//", StringComparison.Ordinal) || path.Contains('\r') || path.Contains('\n'))
             throw new InvalidDataException("APIの接続先が正しくありません。");
@@ -33,8 +39,9 @@ public sealed class GhTransport : IGitHubTransport
             RedirectStandardError = true, RedirectStandardInput = true, StandardOutputEncoding = Encoding.UTF8,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
         };
-        foreach (var value in new[] { "api", "--hostname", "github.com", "--method", "GET", "--include",
+        foreach (var value in new[] { "api", "--hostname", "github.com", "--method", payload is null ? "GET" : "POST", "--include",
             "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2022-11-28", path }) start.ArgumentList.Add(value);
+        if (payload is not null) { start.ArgumentList.Add("--input"); start.ArgumentList.Add("-"); }
         var inherited = new Dictionary<string, string>();
         foreach (var key in new[] { "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "HOMEDRIVE", "HOMEPATH" })
             if (Environment.GetEnvironmentVariable(key) is { } value) inherited[key] = value;
@@ -47,10 +54,12 @@ public sealed class GhTransport : IGitHubTransport
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
         process.Start();
-        process.StandardInput.Close();
+
         // Drain diagnostics, but never expose them: gh errors can contain sensitive response details.
         var diagnostics = process.StandardError.BaseStream.CopyToAsync(Stream.Null, timeout.Token);
         try {
+            if (payload is not null) await process.StandardInput.WriteAsync(payload.AsMemory(), timeout.Token);
+            process.StandardInput.Close();
             var output = new StringBuilder();
             var buffer = new char[8192];
             int read;
