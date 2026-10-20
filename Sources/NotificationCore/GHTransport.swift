@@ -1,9 +1,20 @@
 import Foundation
 
-public struct GHTransport: GitHubTransport {
+public struct GHTransport: GitHubTransport, ReviewCommentTransport {
     public init() {}
 
     public func get(_ path: String) async throws -> APIResponse {
+        try await request(path, payload: nil)
+    }
+
+    public func postComment(_ path: String, body: String) async throws -> APIResponse {
+        guard BotReviewRequest.isCommentPath(path) else {
+            throw SignalError.message("レビュー依頼先が正しくありません。")
+        }
+        return try await request(path, payload: JSONEncoder().encode(["body": body]))
+    }
+
+    private func request(_ path: String, payload: Data?) async throws -> APIResponse {
         guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains("\n"), !path.contains("\r") else {
             throw SignalError.message("APIの接続先が正しくありません。")
         }
@@ -18,14 +29,17 @@ public struct GHTransport: GitHubTransport {
             }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: binary)
-            process.arguments = ["api", "--hostname", "github.com", "--method", "GET", "--include",
+            process.arguments = ["api", "--hostname", "github.com", "--method", payload == nil ? "GET" : "POST", "--include",
                                  "-H", "Accept: application/vnd.github+json", "-H", "X-GitHub-Api-Version: 2022-11-28", path]
+            if payload != nil { process.arguments! += ["--input", "-"] }
             process.environment = [
                 "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin",
                 "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat", "NO_COLOR": "1"
             ]
-            process.standardInput = FileHandle.nullDevice
+            let input = Pipe()
+            process.standardInput = payload == nil ? FileHandle.nullDevice : input
+
             let pipe = Pipe()
             process.standardOutput = pipe
             // Do not mix diagnostics into JSON/HTTP headers or retain potentially sensitive errors.
@@ -35,7 +49,14 @@ public struct GHTransport: GitHubTransport {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 30, execute: timeout)
             let forceStop = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 32, execute: forceStop)
-            defer { timeout.cancel(); forceStop.cancel() }
+            defer {
+                timeout.cancel(); forceStop.cancel()
+                if process.isRunning { kill(process.processIdentifier, SIGKILL); process.waitUntilExit() }
+            }
+            if let payload {
+                try input.fileHandleForWriting.write(contentsOf: payload)
+                try input.fileHandleForWriting.close()
+            }
             var output = Data()
             while true {
                 let chunk = pipe.fileHandleForReading.availableData

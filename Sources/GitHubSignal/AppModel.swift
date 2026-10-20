@@ -299,6 +299,11 @@ final class AppModel: ObservableObject {
         _ = state.openSignal(signal.id, entireThread: entireThread) { NSWorkspace.shared.open($0) }
     }
 
+    func requestReview(_ request: BotReviewRequest, account: String) async throws {
+        guard ready, !demo else { throw SignalError.message("現在は投稿できません。") }
+        try await BotReviewClient(transport: GHTransport()).send(request, account: account)
+    }
+
     func copyURL(_ signal: Signal) {
         guard let url = SignalRules.safeWebURL(signal.url) else { return }
         NSPasteboard.general.clearContents()

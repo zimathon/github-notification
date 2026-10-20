@@ -27,6 +27,7 @@ public sealed record ThreadRow(string Key, List<Signal> Signals, PullRequestInfo
     public string PrLabel => PullRequest?.Label ?? "状態未取得";
     public Visibility PrVisibility => PullRequestInfo.ApiPath(Latest) is null ? Visibility.Collapsed : Visibility.Visible;
     public string PrHelp => PullRequest is null ? "PRの状態を順次取得します" : $"PRの状態 · 最終取得 {PullRequest.CheckedAt.ToLocalTime():g}";
+    public bool Selected { get; init; }
     public bool Starred { get; init; }
     public string StarLabel => Starred ? "★" : "☆";
     public string StarHelp => Starred ? "スターを外す" : "スターを付ける";
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private readonly bool demo;
     private readonly CancellationToken lifetime;
     private bool refreshing;
+    private readonly HashSet<string> selectedPRs = new();
     private DateTimeOffset nextUpdateCheck;
     private bool checkingUpdate;
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -75,6 +77,7 @@ public partial class MainWindow : Window
         SetOptions(OwnerFilter, signals.Select(x => x.Repository.Split('/')[0]), owner, "組織：すべて");
         owner = (string?)OwnerFilter.SelectedValue ?? "";
         SetOptions(RepositoryFilter, signals.Where(x => owner == "" || x.Repository.Split('/')[0] == owner).Select(x => x.Repository), engine.State.Settings.ViewRepository, "リポジトリ：すべて");
+        SetOptions(PersonFilter, signals.Select(x => engine.State.PullRequests.GetValueOrDefault(x.ThreadKey)?.Author).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()), (string?)PersonFilter.SelectedValue ?? "", "作成者：全員");
         CountLabel.Text = $"未確認 {engine.PendingCount}件";
         ToggleButton.Content = engine.State.Enabled ? "停止" : "開始";
         ToggleButton.IsEnabled = engine.Ready && !demo;
@@ -98,22 +101,72 @@ public partial class MainWindow : Window
         var repo = (string?)RepositoryFilter.SelectedValue ?? "";
         var kind = (string?)KindFilter.SelectedValue ?? "";
         var authorFilter = (string?)AuthorFilter.SelectedValue ?? "all";
+        var person = (string?)PersonFilter.SelectedValue ?? "";
         var search = SearchBox.Text.Trim();
         var now = DateTimeOffset.UtcNow;
         int.TryParse((string?)DateFilter.SelectedValue, out var days);
         // Date filtering changes visibility, not acknowledgement scope.
-        var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)) { Starred = engine.State.StarredThreads.Contains(x.Key) })
+        var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)) { Starred = engine.State.StarredThreads.Contains(x.Key), Selected = selectedPRs.Contains(x.Key) })
+            .Where(x => person == "" || string.Equals(x.PullRequest?.Author, person, StringComparison.OrdinalIgnoreCase))
             .Where(x => PullRequestAuthorFilter.Includes(x.Latest, x.PullRequest, engine.State.Account, authorFilter))
             .Where(x => (StarredOnly.IsChecked == true ? x.Starred : ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && (repo == "" || x.Repository == repo) &&
                 (kind == "" || x.Signals.Any(s => s.Kind.ToString() == kind && (StarredOnly.IsChecked == true || ShowAcknowledged.IsChecked == true || !s.Acknowledged))) &&
                 (search == "" || x.Signals.Any(s => (s.Title + " " + s.Actor + " " + s.Excerpt).Contains(search, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(x => x.Latest.Date).ToList();
+        selectedPRs.IntersectWith(rows.Select(x => x.Key));
         ThreadList.ItemsSource = rows;
+        UpdateSelection();
         ShowAcknowledged.IsEnabled = StarredOnly.IsChecked != true;
         UndoButton.IsEnabled = engine.Ready && engine.State.CanUndoAcknowledgement;
         AcknowledgeAllButton.IsEnabled = engine.Ready && rows.Any(x => x.HasPending);
         ClearMergedButton.IsEnabled = engine.Ready && VisibleMergedThreadKeys.Length > 0;
         EmptyLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private ThreadRow[] VisiblePRs => ThreadList.Items.Cast<ThreadRow>().Where(x => PullRequestInfo.ApiPath(x.Latest) != null).ToArray();
+    private void UpdateSelection()
+    {
+        var count = VisiblePRs.Count(x => selectedPRs.Contains(x.Key));
+        CopySelectedButton.Content = $"URLをコピー（{count}件）";
+        CopySelectedButton.IsEnabled = count > 0;
+        ReviewSelectedButton.IsEnabled = count > 0 && engine.Ready && !demo;
+        SelectAllPRs.IsEnabled = VisiblePRs.Length > 0;
+        SelectAllPRs.IsChecked = VisiblePRs.Length > 0 && count == VisiblePRs.Length;
+    }
+    private void SelectPR_Click(object sender, RoutedEventArgs e)
+    {
+        var check = (CheckBox)sender;
+        var key = (string)check.Tag;
+        if (check.IsChecked == true) selectedPRs.Add(key); else selectedPRs.Remove(key);
+        UpdateSelection();
+    }
+    private void SelectAllPRs_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var row in VisiblePRs)
+            if (SelectAllPRs.IsChecked == true) selectedPRs.Add(row.Key); else selectedPRs.Remove(row.Key);
+        RenderThreads();
+    }
+    private void ReviewSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (demo || !engine.Ready) return;
+        var signals = VisiblePRs.Where(x => selectedPRs.Contains(x.Key)).Select(x => x.Latest).ToArray();
+        if (signals.Length == 0) return;
+        var account = engine.State.Account ?? "";
+        var client = new BotReviewClient(new GhTransport());
+        var dialog = new BotReviewWindow(signals, account, request => {
+            if (demo || !engine.Ready) throw new InvalidOperationException("現在は投稿できません。");
+            return client.SendAsync(request, account);
+        }) { Owner = this };
+        dialog.ShowDialog();
+    }
+    private void CopySelected_Click(object sender, RoutedEventArgs e)
+    {
+        var urls = VisiblePRs.Where(x => selectedPRs.Contains(x.Key)).Select(x => {
+            var parts = PullRequestInfo.ApiPath(x.Latest)!.Split('/');
+            return $"https://github.com/{parts[2]}/{parts[3]}/pull/{parts[5]}";
+        }).Distinct().ToArray();
+        if (urls.Length == 0) return;
+        try { Clipboard.SetText(string.Join(Environment.NewLine, urls)); StatusLabel.Text = $"{urls.Length}件のURLをコピーしました。"; }
+        catch (System.Runtime.InteropServices.COMException) { StatusLabel.Text = "コピーできませんでした。もう一度お試しください。"; }
     }
     private void Owner_Changed(object sender, SelectionChangedEventArgs e)
     {

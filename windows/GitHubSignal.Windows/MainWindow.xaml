@@ -17,6 +17,9 @@
         <Button x:Name="ClearMergedButton" DockPanel.Dock="Right" Content="マージ済みをクリア" Click="ClearMerged_Click" Margin="5,0,0,0" ToolTip="表示中のマージ済みPRの通知をすべて確認済みにする（Ctrl+Zで取り消し）"/>
         <ComboBox x:Name="AuthorFilter" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" HorizontalAlignment="Left" MinWidth="120" ToolTip="PRの作成者で絞り込み（作成者未取得のPR・Issueは「すべて」で表示）" AutomationProperties.Name="PR作成者"/>
       </DockPanel>
+      <Button x:Name="ReviewSelectedButton" Content="選択したPRのAIレビューを依頼…" Click="ReviewSelected_Click" HorizontalAlignment="Right" Margin="0,0,0,6"/>
+      <ComboBox x:Name="PersonFilter" DisplayMemberPath="Label" SelectedValuePath="Value" SelectionChanged="Filter_Changed" Margin="0,0,0,6" ToolTip="個別のPR作成者で絞り込み" AutomationProperties.Name="人"/>
+      <DockPanel Margin="0,0,0,6"><Button x:Name="CopySelectedButton" DockPanel.Dock="Right" Content="URLをコピー（0件）" Click="CopySelected_Click" IsEnabled="False" ToolTip="表示中で選択したPRのURLを改行区切りでコピー"/><CheckBox x:Name="SelectAllPRs" Content="表示中のPRを選択" VerticalAlignment="Center" Click="SelectAllPRs_Click"/></DockPanel>
       <DockPanel Margin="0,0,0,6"><Button x:Name="AcknowledgeAllButton" DockPanel.Dock="Left" Content="一括確認" Click="AcknowledgeAll_Click" ToolTip="表示中のPR・Issueをすべて確認済みにする"/><Button x:Name="UndoButton" DockPanel.Dock="Left" Content="↶" Click="Undo_Click" ToolTip="確認済みを元に戻す（Ctrl+Z）" AutomationProperties.Name="確認済みを元に戻す"/><CheckBox x:Name="StarredOnly" DockPanel.Dock="Left" Content="★" Click="Filter_Changed" VerticalAlignment="Center" ToolTip="スター付きだけ表示" AutomationProperties.Name="スター付きだけ表示"/><CheckBox x:Name="ShowAcknowledged" DockPanel.Dock="Right" Content="確認済みも表示" VerticalAlignment="Center" Margin="8,0,0,0" Click="Filter_Changed"/><TextBox x:Name="SearchBox" TextChanged="Search_Changed" ToolTip="タイトル・投稿者で検索" AutomationProperties.Name="通知を検索"/></DockPanel>
       <Border x:Name="UpdateBanner" Background="#DFEEE5" Padding="6" Margin="0,0,0,6" Visibility="Collapsed"><Button x:Name="UpdateButton" Click="Update_Click" HorizontalAlignment="Stretch" Margin="0"/></Border>
       <TextBlock x:Name="ErrorLabel" TextWrapping="Wrap" Foreground="#A72B30" Margin="0,0,0,6" Visibility="Collapsed"/>
@@ -30,6 +33,7 @@
               <Border Background="White" BorderBrush="#DCE2E8" BorderThickness="1" CornerRadius="7" Padding="9" Margin="0,0,0,7">
                 <StackPanel>
                   <DockPanel>
+                    <CheckBox DockPanel.Dock="Left" IsChecked="{Binding Selected, Mode=OneWay}" Tag="{Binding Key}" Visibility="{Binding PrVisibility}" Click="SelectPR_Click" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="PRを選択" AutomationProperties.Name="{Binding Title}"/>
                     <Button DockPanel.Dock="Left" Content="{Binding StarLabel}" Tag="{Binding Key}" Click="Star_Click" ToolTip="{Binding StarHelp}" AutomationProperties.Name="{Binding StarHelp}" Foreground="#A66B00" FontSize="16" Padding="2,0"/>
                     <Border DockPanel.Dock="Right" Visibility="{Binding PrVisibility}" ToolTip="{Binding PrHelp}" CornerRadius="8" Padding="5,2" Margin="6,0,0,0" Background="{Binding PullRequest, Converter={StaticResource SignalBadge}, ConverterParameter=background}"><TextBlock Text="{Binding PrLabel}" FontSize="12" Foreground="{Binding PullRequest, Converter={StaticResource SignalBadge}}"/></Border>
                     <TextBlock Text="{Binding Repository}" FontSize="12" Foreground="#52606D" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>

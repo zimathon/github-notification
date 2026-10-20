@@ -11,6 +11,15 @@ struct InboxView: View {
     @FocusState private var editingText: Bool
     @State private var filter = "すべて"
     @State private var search = ""
+    @State private var person = ""
+    @State private var selectedPRs: Set<String> = []
+    @State private var copyMessage = ""
+    private struct ReviewSelection: Identifiable {
+        let id = UUID()
+        let signals: [Signal]
+        let account: String
+    }
+    @State private var reviewSelection: ReviewSelection?
     @AppStorage("inboxAuthorFilter") private var authorFilter = "all"
     @AppStorage("inboxDateRange") private var dateRange = 0
     @State private var settingsOpen = false
@@ -31,6 +40,7 @@ struct InboxView: View {
                 && (organization.isEmpty || owner(of: $0.repository) == organization)
                 && (repository.isEmpty || $0.repository == repository)
                 && (PullRequestAuthorFilter(rawValue: authorFilter) ?? .all).includes($0, info: model.state.pullRequests[$0.threadKey], account: model.state.account)
+                && (person.isEmpty || model.state.pullRequests[$0.threadKey]?.author?.lowercased() == person)
                 && (SignalDateRange(rawValue: dateRange) ?? .all).includes($0.date)
         }
     }
@@ -47,6 +57,20 @@ struct InboxView: View {
     private var repositories: [String] {
         Array(Set(model.filteredSignals.filter { organization.isEmpty || owner(of: $0.repository) == organization }
             .map(\.repository)).union(repository.isEmpty ? [] : [repository])).sorted()
+    }
+
+    private var people: [String] {
+        Array(Set(model.filteredSignals.compactMap {
+            model.state.pullRequests[$0.threadKey]?.author?.lowercased()
+        }.filter { !$0.isEmpty }).union(person.isEmpty ? [] : [person])).sorted()
+    }
+
+    private var selectablePRs: [SignalGroup] {
+        groups.filter { $0.signals.first.flatMap { PullRequestInfo.apiPath(for: $0) } != nil }
+    }
+
+    private var selectedVisiblePRs: [SignalGroup] {
+        selectablePRs.filter { selectedPRs.contains($0.id) }
     }
 
     private struct SignalGroup: Identifiable {
@@ -108,6 +132,7 @@ struct InboxView: View {
         .background(InboxBackground())
         .tint(accent)
         .sheet(isPresented: $settingsOpen) { settings }
+        .sheet(item: $reviewSelection) { selection in BotReviewView(model: model, signals: selection.signals, account: selection.account) }
     }
 
     private var header: some View {
@@ -188,8 +213,8 @@ struct InboxView: View {
                     }
                 }.labelsHidden().frame(width: 110).help("PRの作成者で絞り込み（作成者未取得のPR・Issueは「すべて」で表示）")
                 Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
-                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" {
-                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all" } label: { Image(systemName: "xmark.circle") }
+                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" || !person.isEmpty {
+                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all"; person = "" } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("絞り込みを解除")
                         .accessibilityLabel("絞り込みを解除")
                 }
@@ -215,14 +240,56 @@ struct InboxView: View {
                 }
                 Button { editingText = false; model.undoAcknowledgement(); showAcknowledged = false } label: { Image(systemName: "arrow.uturn.backward") }
                     .buttonStyle(.bordered)
-                    .disabled(!model.ready || !model.state.canUndoAcknowledgement || settingsOpen)
-                    .keyboardShortcut(editingText || settingsOpen ? nil : KeyboardShortcut("z", modifiers: .command))
+                    .disabled(!model.ready || !model.state.canUndoAcknowledgement || settingsOpen || reviewSelection != nil)
+                    .keyboardShortcut(editingText || settingsOpen || reviewSelection != nil ? nil : KeyboardShortcut("z", modifiers: .command))
                     .help("確認済みを元に戻す（⌘Z）")
                     .accessibilityLabel("確認済みを元に戻す")
                 Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox).disabled(starredOnly)
                 TextField("検索", text: $search).focused($editingText).textFieldStyle(.roundedBorder).frame(width: 85)
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
                 .id(colorScheme)
+            HStack {
+                Spacer()
+                Button("選択したPRのAIレビューを依頼…") {
+                    reviewSelection = ReviewSelection(signals: selectedVisiblePRs.compactMap { $0.signals.first }, account: model.state.account ?? "")
+                }.disabled(selectedVisiblePRs.isEmpty || model.demo || !model.ready)
+                    .help("Codex・Claudeを選び、投稿内容を確認する")
+            }.font(.system(size: 12)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
+            Picker("人", selection: $person) {
+                Text("作成者：全員").tag("")
+                ForEach(people, id: \.self) { Text("@" + $0).tag($0) }
+            }.labelsHidden().help("個別のPR作成者で絞り込み")
+                .font(.system(size: 13)).controlSize(.small)
+                .padding(.horizontal, 8).padding(.top, 4).id(colorScheme)
+            HStack(spacing: 8) {
+                Toggle("表示中のPRを選択", isOn: Binding(
+                    get: { !selectablePRs.isEmpty && selectedVisiblePRs.count == selectablePRs.count },
+                    set: { checked in
+                        let keys = Set(selectablePRs.map(\.id))
+                        if checked { selectedPRs.formUnion(keys) } else { selectedPRs.subtract(keys) }
+                        copyMessage = ""
+                    }
+                )).toggleStyle(.checkbox).disabled(selectablePRs.isEmpty)
+                Spacer()
+                if !copyMessage.isEmpty { Text(copyMessage).foregroundStyle(.secondary) }
+                Button("URLをコピー（\(selectedVisiblePRs.count)件）") {
+                    let urls = selectedVisiblePRs.compactMap { group -> String? in
+                        guard let signal = group.signals.first,
+                              let path = PullRequestInfo.apiPath(for: signal) else { return nil }
+                        let parts = path.split(separator: "/")
+                        return "https://github.com/\(parts[1])/\(parts[2])/pull/\(parts[4])"
+                    }
+                    guard !urls.isEmpty else { return }
+                    NSPasteboard.general.clearContents()
+                    copyMessage = NSPasteboard.general.setString(urls.joined(separator: "\n"), forType: .string)
+                        ? "コピー済み" : "コピー失敗"
+                }.disabled(selectedVisiblePRs.isEmpty).help("表示中で選択したPRのURLを改行区切りでコピー")
+            }.font(.system(size: 12)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
+            .onChange(of: selectedPRs) { _ in copyMessage = "" }
+            .onChange(of: groups.map(\.id)) { ids in
+                selectedPRs.formIntersection(Set(ids))
+                copyMessage = ""
+            }
             if visible.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: model.syncing ? "arrow.triangle.2.circlepath" : "checkmark.circle")
@@ -250,6 +317,13 @@ struct InboxView: View {
             if let latest = group.signals.first {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        if PullRequestInfo.apiPath(for: latest) != nil {
+                            Toggle("PRを選択", isOn: Binding(
+                                get: { selectedPRs.contains(group.id) },
+                                set: { if $0 { selectedPRs.insert(group.id) } else { selectedPRs.remove(group.id) } }
+                            )).toggleStyle(.checkbox).labelsHidden()
+                                .accessibilityLabel("\(latest.title)を選択")
+                        }
                         Button { model.toggleStar(group.id) } label: {
                             Image(systemName: model.state.starredThreads.contains(group.id) ? "star.fill" : "star")
                                 .foregroundStyle(model.state.starredThreads.contains(group.id) ? Color.orange : Color.secondary)

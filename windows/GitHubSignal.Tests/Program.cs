@@ -317,6 +317,46 @@ Async("Author backfill includes acknowledged PRs without changing acknowledgemen
     Equal(2, fake.Paths.Count(x => x == "/user"));
     Equal(1, fake.Paths.Count(x => x.StartsWith("/repos/")));
 });
+Test("Bot review plan deduplicates PRs and separates bots", () => {
+    var signals = new[] { Signal("one"), Signal("two", "https://github.com/acme/repo/pull/1/files#discussion-2"), Signal("issue", "https://github.com/acme/repo/issues/2") };
+    var plan = BotReviewRequest.Plan(signals, [ReviewBot.Codex, ReviewBot.Claude]);
+    Equal(2, plan.Length);
+    Equal("/repos/acme/repo/issues/1/comments", plan[0].Path);
+    Equal("https://github.com/acme/repo/pull/1", plan[0].Url);
+    Equal("@codex review", plan[0].Body);
+    Equal(true, plan[1].Body.StartsWith("@claude "));
+    Equal(true, plan[1].Body.Contains("コードの変更やcommit・pushは行わず"));
+    Equal(1, BotReviewRequest.Plan(signals, [ReviewBot.Claude]).Length);
+    Equal(0, BotReviewRequest.Plan(signals, []).Length);
+    foreach (var path in new[] { "/repos/../repo/issues/1/comments", "/repos/org/./issues/1/comments", "//evil.test", "/repos/org/repo/pulls/1/comments", "/repos/org/repo/issues/1/comments\n", "/repos/org/repo/issues/1/comments?x=1" })
+        Equal(false, BotReviewRequest.IsCommentPath(path));
+    Throws<InvalidDataException>(() => new GhTransport().PostCommentAsync("/user", "@codex review"));
+    Equal<BotReviewRequest?>(null, BotReviewRequest.Create(Signal("bad", "https://evil.test/acme/repo/pull/1"), ReviewBot.Codex));
+});
+Async("Bot comment writes are attempted once and failures do not block the next bot", async () => {
+    var transport = new ReviewFake();
+    var client = new BotReviewClient(transport);
+    var plan = BotReviewRequest.Plan([Signal("one")], [ReviewBot.Codex, ReviewBot.Claude]);
+    try { await client.SendAsync(plan[0], "me"); throw new Exception("Expected timeout"); } catch (TimeoutException) { }
+    await client.SendAsync(plan[1], "me");
+    Equal(2, transport.Bodies.Count);
+    Equal(plan[0].Body, transport.Bodies[0]); Equal(plan[1].Body, transport.Bodies[1]);
+});
+Async("Bot review blocks account changes and failed verification before writing", async () => {
+    var transport = new ReviewFake { Login = "other" };
+    var client = new BotReviewClient(transport);
+    var request = BotReviewRequest.Create(Signal("one"), ReviewBot.Codex)!;
+    try { await client.SendAsync(request, "me"); throw new Exception("Expected account mismatch"); } catch (ReviewAccountException) { }
+    Equal(0, transport.Bodies.Count);
+    transport.Login = "ME";
+    try { await client.SendAsync(request, "me"); throw new Exception("Expected timeout"); } catch (TimeoutException) { }
+    transport.Login = "other";
+    try { await client.SendAsync(request, "me"); throw new Exception("Expected mismatch on next write"); } catch (ReviewAccountException) { }
+    Equal(1, transport.Bodies.Count);
+    transport.FailAccount = true;
+    try { await client.SendAsync(request, "me"); throw new Exception("Expected account verification failure"); } catch (ReviewAccountException) { }
+    Equal(1, transport.Bodies.Count);
+});
 int failures = 0;
 try {
     foreach (var test in tests) {
@@ -331,4 +371,19 @@ sealed class Fake(Func<string, CancellationToken, Task<ApiResponse>> respond) : 
 {
     public List<string> Paths { get; } = [];
     public Task<ApiResponse> GetAsync(string path, CancellationToken cancellation = default) { Paths.Add(path); return respond(path, cancellation); }
+}
+
+sealed class ReviewFake : IReviewCommentTransport
+{
+    public List<string> Bodies { get; } = [];
+    public string Login { get; set; } = "ME";
+    public bool FailAccount { get; set; }
+    public Task<ApiResponse> GetAsync(string path, CancellationToken cancellation = default) => FailAccount
+        ? Task.FromException<ApiResponse>(new IOException("Disconnected"))
+        : Task.FromResult(new ApiResponse(JsonSerializer.Serialize(new { login = Login }), new()));
+    public Task<ApiResponse> PostCommentAsync(string path, string body, CancellationToken cancellation = default)
+    {
+        Bodies.Add(body);
+        return Bodies.Count == 1 ? Task.FromException<ApiResponse>(new TimeoutException()) : Task.FromResult(new ApiResponse("{}", new()));
+    }
 }
