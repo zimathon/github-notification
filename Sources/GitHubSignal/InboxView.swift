@@ -331,6 +331,9 @@ struct InboxView: View {
                             .help(model.state.starredThreads.contains(group.id) ? "スターを外す" : "スターを付ける")
                             .accessibilityLabel(model.state.starredThreads.contains(group.id) ? "スターを外す" : "スターを付ける")
                         Text(latest.repository).lineLimit(1)
+                        if let path = PullRequestInfo.apiPath(for: latest), let number = path.split(separator: "/").last {
+                            Text("#" + number).fixedSize().help("PR番号")
+                        }
                         pullRequestBadge(latest)
                         Spacer()
                         Text(group.signals.allSatisfy(\.acknowledged) ? "確認済み" : "未確認 \(group.signals.filter { !$0.acknowledged }.count)")
