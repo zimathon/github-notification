@@ -24,6 +24,7 @@ public sealed record ThreadRow(string Key, List<Signal> Signals, PullRequestInfo
     public string Preview => Latest.Preview;
     public bool HasPending => Signals.Any(x => !x.Acknowledged);
     public string Summary => $"@{Latest.Actor} · {Latest.TimeLabel}";
+    public string PrNumber => PullRequestInfo.ApiPath(Latest) is { } path ? "#" + path.Split('/')[^1] : "";
     public string PrLabel => PullRequest?.Label ?? "状態未取得";
     public Visibility PrVisibility => PullRequestInfo.ApiPath(Latest) is null ? Visibility.Collapsed : Visibility.Visible;
     public string PrHelp => PullRequest is null ? "PRの状態を順次取得します" : $"PRの状態 · 最終取得 {PullRequest.CheckedAt.ToLocalTime():g}";
