@@ -76,8 +76,8 @@ public partial class MainWindow : Window
         var owner = engine.State.Settings.ViewOrganization;
         SetOptions(OwnerFilter, signals.Select(x => x.Repository.Split('/')[0]), owner, "組織：すべて");
         owner = (string?)OwnerFilter.SelectedValue ?? "";
-        SetOptions(RepositoryFilter, signals.Where(x => owner == "" || x.Repository.Split('/')[0] == owner).Select(x => x.Repository), engine.State.Settings.ViewRepository, "リポジトリ：すべて");
-        SetOptions(PersonFilter, signals.Select(x => engine.State.PullRequests.GetValueOrDefault(x.ThreadKey)?.Author).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()), (string?)PersonFilter.SelectedValue ?? "", "作成者：全員");
+        SetEditableOptions(RepositoryFilter, signals.Where(x => owner == "" || x.Repository.Split('/')[0] == owner).Select(x => x.Repository), engine.State.Settings.ViewRepository, "リポジトリ：すべて");
+        SetEditableOptions(PersonFilter, signals.Select(x => engine.State.PullRequests.GetValueOrDefault(x.ThreadKey)?.Author).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()), (string?)PersonFilter.SelectedValue ?? "", "作成者：全員");
         CountLabel.Text = $"未確認 {engine.PendingCount}件";
         ToggleButton.Content = engine.State.Enabled ? "停止" : "開始";
         ToggleButton.IsEnabled = engine.Ready && !demo;
@@ -94,22 +94,42 @@ public partial class MainWindow : Window
         combo.ItemsSource = options;
         combo.SelectedValue = options.Any(x => x.Value == selected) ? selected : "";
     }
+    private static void SetEditableOptions(ComboBox combo, IEnumerable<string> values, string selected, string all)
+    {
+        var typed = combo.ItemsSource != null && !(combo.SelectedItem is FilterOption option && combo.Text == option.Label) ? combo.Text : null;
+        SetOptions(combo, values, selected, all);
+        if (typed != null) { combo.SelectedItem = null; combo.Text = typed; }
+    }
+    private static bool MatchesEditable(ComboBox combo, string? value, bool person = false)
+    {
+        if (combo.SelectedItem is FilterOption option && combo.Text == option.Label)
+            return option.Value == "" || string.Equals(value, option.Value, StringComparison.OrdinalIgnoreCase);
+        var query = combo.Text.Trim();
+        if (person) query = query.TrimStart('@');
+        return query == "" || value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+    }
+    private void FilterText_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (refreshing || !IsInitialized) return;
+        if (ReferenceEquals(sender, RepositoryFilter) && engine.State.Settings.ViewRepository != ""
+            && !(RepositoryFilter.SelectedItem is FilterOption option && RepositoryFilter.Text == option.Label))
+            engine.Mutate(x => x.Settings.ViewRepository = "");
+        else RenderThreads();
+    }
     private void RenderThreads()
     {
         if (refreshing || !IsInitialized) return;
         var owner = (string?)OwnerFilter.SelectedValue ?? "";
-        var repo = (string?)RepositoryFilter.SelectedValue ?? "";
         var kind = (string?)KindFilter.SelectedValue ?? "";
         var authorFilter = (string?)AuthorFilter.SelectedValue ?? "all";
-        var person = (string?)PersonFilter.SelectedValue ?? "";
         var search = SearchBox.Text.Trim();
         var now = DateTimeOffset.UtcNow;
         int.TryParse((string?)DateFilter.SelectedValue, out var days);
         // Date filtering changes visibility, not acknowledgement scope.
         var rows = engine.Included.Where(s => SignalDateRange.Includes(s.Date, days, now)).GroupBy(x => x.ThreadKey).Select(x => new ThreadRow(x.Key, x.OrderByDescending(s => s.Date).ToList(), engine.State.PullRequests.GetValueOrDefault(x.Key)) { Starred = engine.State.StarredThreads.Contains(x.Key), Selected = selectedPRs.Contains(x.Key) })
-            .Where(x => person == "" || string.Equals(x.PullRequest?.Author, person, StringComparison.OrdinalIgnoreCase))
+            .Where(x => MatchesEditable(PersonFilter, x.PullRequest?.Author, person: true))
             .Where(x => PullRequestAuthorFilter.Includes(x.Latest, x.PullRequest, engine.State.Account, authorFilter))
-            .Where(x => (StarredOnly.IsChecked == true ? x.Starred : ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && (repo == "" || x.Repository == repo) &&
+            .Where(x => (StarredOnly.IsChecked == true ? x.Starred : ShowAcknowledged.IsChecked == true || x.HasPending) && (owner == "" || x.Repository.Split('/')[0] == owner) && MatchesEditable(RepositoryFilter, x.Repository) &&
                 (kind == "" || x.Signals.Any(s => s.Kind.ToString() == kind && (StarredOnly.IsChecked == true || ShowAcknowledged.IsChecked == true || !s.Acknowledged))) &&
                 (search == "" || x.Signals.Any(s => (s.Title + " " + s.Actor + " " + s.Excerpt).Contains(search, StringComparison.OrdinalIgnoreCase))))
             .OrderByDescending(x => x.Latest.Date).ToList();
@@ -171,12 +191,24 @@ public partial class MainWindow : Window
     private void Owner_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (refreshing || !IsInitialized) return;
+        refreshing = true;
+        RepositoryFilter.SelectedValue = "";
+        RepositoryFilter.Text = (RepositoryFilter.SelectedItem as FilterOption)?.Label ?? "";
+        refreshing = false;
         engine.Mutate(x => { x.Settings.ViewOrganization = (string?)OwnerFilter.SelectedValue ?? ""; x.Settings.ViewRepository = ""; });
     }
     private void Filter_Changed(object sender, RoutedEventArgs e)
     {
         if (refreshing || !IsInitialized) return;
-        if (ReferenceEquals(sender, RepositoryFilter)) engine.Mutate(x => x.Settings.ViewRepository = (string?)RepositoryFilter.SelectedValue ?? "");
+        if (ReferenceEquals(sender, RepositoryFilter)) {
+            if (RepositoryFilter.SelectedItem is FilterOption option) {
+                // SelectionChanged runs before ComboBox updates its editable text.
+                refreshing = true; RepositoryFilter.Text = option.Label; refreshing = false;
+                engine.Mutate(x => x.Settings.ViewRepository = option.Value);
+            }
+            else if (engine.State.Settings.ViewRepository != "") engine.Mutate(x => x.Settings.ViewRepository = "");
+            else RenderThreads();
+        }
         else if (ReferenceEquals(sender, DateFilter)) engine.Mutate(x => x.Settings.ViewDays = int.TryParse((string?)DateFilter.SelectedValue, out var days) ? days : 0);
         else if (ReferenceEquals(sender, AuthorFilter)) engine.Mutate(x => x.Settings.ViewAuthorFilter = (string?)AuthorFilter.SelectedValue ?? "all");
         else RenderThreads();
@@ -292,6 +324,7 @@ public partial class MainWindow : Window
         engine.Mutate(x => x.PullRequests[x.Signals[0].ThreadKey] = new("open", DateTimeOffset.UtcNow, "someone-else"));
         if (VisibleThreadCount != 1) throw new InvalidOperationException("Other PR metadata refresh failed");
         AuthorFilter.SelectedValue = "all";
+        CheckEditableFiltersSmoke();
         SearchBox.Text = "nothing-matches";
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Search filter failed");
         SearchBox.Text = "";
@@ -310,6 +343,40 @@ public partial class MainWindow : Window
         UpdateLayout();
         Descendants(this).OfType<Button>().First(x => Equals(x.Content, "★")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Star removal filter failed");
+    }
+    private void CheckEditableFiltersSmoke()
+    {
+        var original = engine.State.Signals[0];
+        var extra = original with { Id = "editable-filter-smoke", Repository = original.Repository + "-extra", Url = "https://github.com/octo-org/example-extra/pull/2" };
+        engine.Mutate(x => { x.Signals.Add(extra); x.PullRequests[extra.ThreadKey] = new("open", DateTimeOffset.UtcNow, "different"); });
+        RepositoryFilter.Text = "EXAMP";
+        if (VisibleThreadCount != 2) throw new InvalidOperationException("Repository substring filter failed");
+        PersonFilter.Text = "@";
+        if (VisibleThreadCount != 2) throw new InvalidOperationException("Bare @ must not filter people");
+        PersonFilter.Text = "@SOMEONE";
+        if (VisibleThreadCount != 1) throw new InvalidOperationException("Person substring filter failed");
+        engine.Mutate(x => x.PullRequests[original.ThreadKey] = new("open", DateTimeOffset.UtcNow, "someone-else"));
+        if (VisibleThreadCount != 1 || PersonFilter.Text != "@SOMEONE" || RepositoryFilter.Text != "EXAMP")
+            throw new InvalidOperationException("Refresh discarded typed filter text");
+        PersonFilter.Text = "";
+        if (VisibleThreadCount != 2) throw new InvalidOperationException("Person keyword clear failed");
+        RepositoryFilter.SelectedValue = original.Repository;
+        if (VisibleThreadCount != 1) throw new InvalidOperationException("Repository candidate selection must be exact");
+        RepositoryFilter.Text = "";
+        if (VisibleThreadCount != 2 || engine.State.Settings.ViewRepository != "")
+            throw new InvalidOperationException("Clearing repository text must clear the saved selection");
+        RepositoryFilter.SelectedValue = "";
+        if (VisibleThreadCount != 2) throw new InvalidOperationException("All repositories selection failed");
+        engine.Mutate(x => { x.Signals.Remove(extra); x.PullRequests.Remove(extra.ThreadKey); });
+        RepositoryFilter.Text = "does-not-match";
+        if (VisibleThreadCount != 0) throw new InvalidOperationException("Repository keyword exclusion failed");
+        RepositoryFilter.Text = "";
+        if (VisibleThreadCount != 1) throw new InvalidOperationException("Repository keyword clear failed");
+        RepositoryFilter.Text = "does-not-match";
+        OwnerFilter.SelectedValue = original.Repository.Split('/')[0];
+        if (VisibleThreadCount != 1 || RepositoryFilter.SelectedItem is not FilterOption all || all.Value != "" || RepositoryFilter.Text != all.Label)
+            throw new InvalidOperationException("Organization change must restore the all-repositories choice");
+        OwnerFilter.SelectedValue = "";
     }
     private void CheckClearMergedSmoke()
     {

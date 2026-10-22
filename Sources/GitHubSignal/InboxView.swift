@@ -12,6 +12,8 @@ struct InboxView: View {
     @State private var filter = "すべて"
     @State private var search = ""
     @State private var person = ""
+    @State private var personQuery = ""
+    @State private var repositoryQuery = ""
     @State private var selectedPRs: Set<String> = []
     @State private var copyMessage = ""
     private struct ReviewSelection: Identifiable {
@@ -33,14 +35,18 @@ struct InboxView: View {
     @AppStorage("inboxRepository") private var repository = ""
     private let accent = Color(red: 0.24, green: 0.58, blue: 0.48)
 
+    private var personKeyword: String { personQuery.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "@")) }
+
     private var visible: [Signal] {
         model.filteredSignals.filter {
             (starredOnly ? model.state.starredThreads.contains($0.threadKey) : $0.acknowledged == showAcknowledged) && (filter == "すべて" || $0.kind.title == filter)
                 && (search.isEmpty || "\($0.title) \($0.repository) \($0.actor) \($0.excerpt)".localizedCaseInsensitiveContains(search))
                 && (organization.isEmpty || owner(of: $0.repository) == organization)
                 && (repository.isEmpty || $0.repository == repository)
+                && (repositoryQuery.isEmpty || $0.repository.localizedCaseInsensitiveContains(repositoryQuery))
                 && (PullRequestAuthorFilter(rawValue: authorFilter) ?? .all).includes($0, info: model.state.pullRequests[$0.threadKey], account: model.state.account)
                 && (person.isEmpty || model.state.pullRequests[$0.threadKey]?.author?.lowercased() == person)
+                && (personKeyword.isEmpty || model.state.pullRequests[$0.threadKey]?.author?.localizedCaseInsensitiveContains(personKeyword) == true)
                 && (SignalDateRange(rawValue: dateRange) ?? .all).includes($0.date)
         }
     }
@@ -177,6 +183,25 @@ struct InboxView: View {
         }.padding(24)
     }
 
+    private func searchableFilter(_ title: String, selection: Binding<String>, query: Binding<String>, values: [String]) -> some View {
+        let keyword = title == "人" ? query.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "@")) : query.wrappedValue
+        return HStack(spacing: 2) {
+            TextField(title + "を検索", text: Binding(
+                get: { selection.wrappedValue.isEmpty ? query.wrappedValue : selection.wrappedValue },
+                set: { selection.wrappedValue = ""; query.wrappedValue = $0 }
+            )).textFieldStyle(.roundedBorder).focused($editingText)
+                .accessibilityLabel(title + "を検索").help(title + "をキーワードで絞り込み")
+            Menu {
+                Button("すべて") { selection.wrappedValue = ""; query.wrappedValue = "" }
+                ForEach(values.filter { keyword.isEmpty || $0.localizedCaseInsensitiveContains(keyword) }, id: \.self) { value in
+                    Button(value) { selection.wrappedValue = value; query.wrappedValue = "" }
+                }
+            } label: { Image(systemName: "chevron.down") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel(title + "の候補").help(title + "の候補を選択")
+        }.frame(maxWidth: .infinity)
+    }
+
     private var inbox: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -184,14 +209,11 @@ struct InboxView: View {
                     Text("すべての組織").tag("")
                     ForEach(organizations, id: \.self) { Text($0).tag($0) }
                 }.labelsHidden().frame(width: 85)
-                    .onChange(of: organization) { _ in repository = "" }
-                Picker("リポジトリ", selection: $repository) {
-                    Text("すべてのリポジトリ").tag("")
-                    ForEach(repositories, id: \.self) { name in
-                        Text(organization.isEmpty ? name : String(name.split(separator: "/").last ?? ""))
-                            .tag(name)
-                    }
-                }.labelsHidden().frame(maxWidth: .infinity)
+                    .onChange(of: organization) { _ in repository = ""; repositoryQuery = "" }
+                searchableFilter("リポジトリ", selection: $repository, query: $repositoryQuery, values: repositories)
+                searchableFilter("人", selection: $person, query: $personQuery, values: people)
+            }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4).id(colorScheme)
+            HStack(spacing: 6) {
                 Picker("種類", selection: $filter) {
                     Text("すべての種類").tag("すべて")
                     ForEach(SignalKind.allCases, id: \.self) { kind in Text(kind.title).tag(kind.title) }
@@ -213,8 +235,8 @@ struct InboxView: View {
                     }
                 }.labelsHidden().frame(width: 110).help("PRの作成者で絞り込み（作成者未取得のPR・Issueは「すべて」で表示）")
                 Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
-                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" || !person.isEmpty {
-                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all"; person = "" } label: { Image(systemName: "xmark.circle") }
+                if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" || !person.isEmpty || !repositoryQuery.isEmpty || !personQuery.isEmpty {
+                    Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all"; person = ""; repositoryQuery = ""; personQuery = "" } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("絞り込みを解除")
                         .accessibilityLabel("絞り込みを解除")
                 }
@@ -255,12 +277,6 @@ struct InboxView: View {
                 }.disabled(selectedVisiblePRs.isEmpty || model.demo || !model.ready)
                     .help("Codex・Claudeを選び、投稿内容を確認する")
             }.font(.system(size: 12)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
-            Picker("人", selection: $person) {
-                Text("作成者：全員").tag("")
-                ForEach(people, id: \.self) { Text("@" + $0).tag($0) }
-            }.labelsHidden().help("個別のPR作成者で絞り込み")
-                .font(.system(size: 13)).controlSize(.small)
-                .padding(.horizontal, 8).padding(.top, 4).id(colorScheme)
             HStack(spacing: 8) {
                 Toggle("表示中のPRを選択", isOn: Binding(
                     get: { !selectablePRs.isEmpty && selectedVisiblePRs.count == selectablePRs.count },
