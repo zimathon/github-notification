@@ -149,6 +149,25 @@ Test("Organization matching and input validation", () => {
     Equal("acme,my-org,user", string.Join(',', settings.Organizations)); Equal(true, settings.Includes("ACME/repo")); Equal(false, settings.Includes("acme-other/repo"));
     Throws<InvalidDataException>(() => Settings.ParseOrganizations("https://github.com/acme"));
 });
+Test("Bot exclusion applies to inbox, counts and reminders without deleting history", () => {
+    var human = Signal("human");
+    var bot = Signal("bot") with { Actor = "reviewer[bot]" };
+    var botOnly = Signal("bot-only", "https://github.com/acme/repo/pull/2") with { Actor = "reviewer[BOT]" };
+    var outside = Signal("outside") with { Repository = "other/repo" };
+    var store = Store();
+    store.Save(new InboxState { Enabled = true, Signals = [human, bot, botOnly, outside], Settings = new() { Organizations = ["acme"] } });
+    var engine = new InboxEngine(store, new Fake((_, _) => throw new Exception("Unexpected HTTP")));
+    Equal(3, engine.Included.Count()); Equal(2, engine.PendingCount); Equal(3, engine.Due(now).Count);
+    engine.Mutate(x => x.Settings.IncludeBots = false);
+    Equal("human", string.Join(',', engine.Included.Select(x => x.Id)));
+    Equal(1, engine.PendingCount); Equal("human", string.Join(',', engine.Due(now).Select(x => x.Id)));
+    var restored = store.Load();
+    Equal(false, restored.Settings.IncludeBots); Equal(4, restored.Signals.Count); Equal(true, restored.Signals.All(x => !x.Acknowledged));
+    engine.MarkNotified(engine.Due(now), now);
+    Equal(0, engine.Due(now.AddMinutes(29)).Count); Equal("human", string.Join(',', engine.Due(now.AddMinutes(30)).Select(x => x.Id)));
+    engine.Mutate(x => x.Settings.IncludeBots = true);
+    Equal(3, engine.Included.Count()); Equal(2, engine.PendingCount); Equal(3, engine.Due(now.AddMinutes(30)).Count);
+});
 Test("Queue keeps earliest retry boundary and persists atomically", () => {
     var state = new InboxState(); var store = Store(); state.Enqueue([Thread()], now.AddHours(-1), now);
     state.Enqueue([Thread()], now.AddMinutes(-30), now.AddMinutes(30)); state.Signals.Add(Signal("a")); store.Save(state);

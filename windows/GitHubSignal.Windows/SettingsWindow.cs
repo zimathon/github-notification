@@ -29,7 +29,7 @@ internal sealed class SettingsWindow : Window
         var poll = new TextBox { Text = current.PollSeconds.ToString() }; panel.Children.Add(poll);
         Label("再通知までの時間（分・0で再通知なし）");
         var reminder = new TextBox { Text = current.ReminderMinutes.ToString() }; panel.Children.Add(reminder);
-        var bots = new CheckBox { Content = "Botからの通知も受け取る", IsChecked = current.IncludeBots, Margin = new Thickness(0, 10, 0, 10) }; panel.Children.Add(bots);
+        var bots = new CheckBox { Content = "Botの投稿を表示・通知する", IsChecked = current.IncludeBots, Margin = new Thickness(0, 10, 0, 10) }; panel.Children.Add(bots);
         var test = new Button { Content = "テスト通知を送る", IsEnabled = !demo, HorizontalAlignment = HorizontalAlignment.Left }; panel.Children.Add(test);
         test.Click += (_, _) => TestRequested?.Invoke();
         Label("Windowsの通知設定や応答不可モードにより、通知が表示されない場合があります。");

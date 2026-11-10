@@ -95,9 +95,9 @@ struct InboxView: View {
         return result
     }
 
-    private var visibleMergedThreadKeys: Set<String> {
+    private var visibleFinishedThreadKeys: Set<String> {
         Set(groups.filter {
-            model.state.pullRequests[$0.id]?.status == "merged" && $0.signals.contains { !$0.acknowledged }
+            ["merged", "closed"].contains(model.state.pullRequests[$0.id]?.status ?? "") && $0.signals.contains { !$0.acknowledged }
         }.map(\.id))
     }
 
@@ -106,11 +106,17 @@ struct InboxView: View {
             header
             Divider()
             if let version = model.availableRelease, !model.demo {
-                HStack {
-                    Text("新しいバージョン \(version)")
-                    Spacer()
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 24)).foregroundStyle(.blue).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("新しいバージョンがあります").fontWeight(.semibold)
+                        Text("\(version) をダウンロードできます").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                     Button("ダウンロード") { model.openRelease() }
-                }.font(.system(size: 13)).padding(8)
+                        .buttonStyle(.borderedProminent).tint(.blue).fixedSize()
+                }.font(.system(size: 13)).padding(12)
+                    .background(Color.blue.opacity(0.12))
             }
             if model.demo {
                 HStack {
@@ -137,6 +143,9 @@ struct InboxView: View {
         .frame(minWidth: 380, minHeight: 280)
         .background(InboxBackground())
         .tint(accent)
+        .onReceive(NotificationCenter.default.publisher(for: .didUndoSignalAcknowledgement)) { _ in
+            showAcknowledged = false
+        }
         .sheet(isPresented: $settingsOpen) { settings }
         .sheet(item: $reviewSelection) { selection in BotReviewView(model: model, signals: selection.signals, account: selection.account) }
     }
@@ -191,6 +200,12 @@ struct InboxView: View {
                 set: { selection.wrappedValue = ""; query.wrappedValue = $0 }
             )).textFieldStyle(.roundedBorder).focused($editingText)
                 .accessibilityLabel(title + "を検索").help(title + "をキーワードで絞り込み")
+            if title == "人" && (!selection.wrappedValue.isEmpty || !query.wrappedValue.isEmpty) {
+                Button { selection.wrappedValue = ""; query.wrappedValue = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .accessibilityLabel("人の絞り込みを解除").help("人の絞り込みを解除")
+            }
             Menu {
                 Button("すべて") { selection.wrappedValue = ""; query.wrappedValue = "" }
                 ForEach(values.filter { keyword.isEmpty || $0.localizedCaseInsensitiveContains(keyword) }, id: \.self) { value in
@@ -223,84 +238,81 @@ struct InboxView: View {
                         Text(range.title).tag(range.rawValue)
                     }
                 }.labelsHidden().frame(width: 85).help("通知の日付（今日を含む）")
-            }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
-                // These controls are AppKit views. They keep the appearance they
-                // were built with, so a light/dark switch alone leaves them stale
-                // until something else rebuilds them. Rebuild them on the switch.
-                .id(colorScheme)
-            HStack(spacing: 6) {
                 Picker("PR作成者", selection: $authorFilter) {
                     ForEach(PullRequestAuthorFilter.allCases, id: \.rawValue) { option in
                         Text(option.title).tag(option.rawValue)
                     }
                 }.labelsHidden().frame(width: 110).help("PRの作成者で絞り込み（作成者未取得のPR・Issueは「すべて」で表示）")
-                Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
                 if !organization.isEmpty || !repository.isEmpty || filter != "すべて" || dateRange != 0 || authorFilter != "all" || !person.isEmpty || !repositoryQuery.isEmpty || !personQuery.isEmpty {
                     Button { organization = ""; repository = ""; filter = "すべて"; dateRange = 0; authorFilter = "all"; person = ""; repositoryQuery = ""; personQuery = "" } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.borderless).help("絞り込みを解除")
                         .accessibilityLabel("絞り込みを解除")
                 }
                 Spacer()
-                Button("マージ済みをクリア") {
-                    editingText = false
-                    model.acknowledgeThreads(visibleMergedThreadKeys)
-                }.buttonStyle(.bordered).disabled(!model.ready || visibleMergedThreadKeys.isEmpty)
-                    .help("表示中のマージ済みPRの通知をすべて確認済みにする（⌘Zで取り消し）")
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
                 .id(colorScheme)
             HStack(spacing: 6) {
-                Spacer()
+                Text("\(groups.count)件").monospacedDigit().foregroundStyle(.secondary).fixedSize()
+                TextField("検索", text: $search).focused($editingText).textFieldStyle(.roundedBorder)
                 Button { starredOnly.toggle() } label: { Image(systemName: starredOnly ? "star.fill" : "star") }
                     .buttonStyle(.bordered).tint(starredOnly ? .orange : accent)
                     .help(starredOnly ? "スターの絞り込みを解除" : "スター付きだけ表示")
                     .accessibilityLabel("スター付きだけ表示")
-                if !showAcknowledged || starredOnly {
-                    Button("一括確認") { editingText = false; model.acknowledgeThreads(Set(groups.map(\.id))) }
-                        .buttonStyle(.bordered).disabled(groups.isEmpty || !model.ready)
-                        .help("表示中のPR・Issueをすべて確認済みにする")
-                        .accessibilityLabel("表示中をすべて確認済みにする")
-                }
-                Button { editingText = false; model.undoAcknowledgement(); showAcknowledged = false } label: { Image(systemName: "arrow.uturn.backward") }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.ready || !model.state.canUndoAcknowledgement || settingsOpen || reviewSelection != nil)
-                    .keyboardShortcut(editingText || settingsOpen || reviewSelection != nil ? nil : KeyboardShortcut("z", modifiers: .command))
-                    .help("確認済みを元に戻す（⌘Z）")
-                    .accessibilityLabel("確認済みを元に戻す")
                 Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox).disabled(starredOnly)
-                TextField("検索", text: $search).focused($editingText).textFieldStyle(.roundedBorder).frame(width: 85)
+                Menu {
+                    Button("AIレビューを依頼（\(selectedVisiblePRs.count)件）…") {
+                        reviewSelection = ReviewSelection(signals: selectedVisiblePRs.compactMap { $0.signals.first }, account: model.state.account ?? "")
+                    }.disabled(selectedVisiblePRs.isEmpty || model.demo || !model.ready)
+                        .help("Codex・Claudeを選び、投稿内容を確認する")
+                    Divider()
+                    if !showAcknowledged || starredOnly {
+                        Button("一括確認") { editingText = false; model.acknowledgeThreads(Set(groups.map(\.id))) }
+                            .disabled(groups.isEmpty || !model.ready)
+                            .help("表示中のPR・Issueをすべて確認済みにする")
+                    }
+                    Button("マージ・クローズ済みをクリア") {
+                        editingText = false
+                        model.acknowledgeThreads(visibleFinishedThreadKeys)
+                    }.disabled(!model.ready || visibleFinishedThreadKeys.isEmpty)
+                        .help("表示中のマージ・クローズ済みPRの通知をすべて確認済みにする（⌘Zで取り消し）")
+                    Divider()
+                    Button("確認済みを元に戻す") { editingText = false; model.undoAcknowledgement(); showAcknowledged = false }
+                        .disabled(!model.ready || !model.state.canUndoAcknowledgement || settingsOpen || reviewSelection != nil)
+                } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("通知の操作").help("AIレビュー・一括確認・マージ／クローズ済みをクリア・元に戻す")
             }.font(.system(size: 13)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
                 .id(colorScheme)
-            HStack {
-                Spacer()
-                Button("選択したPRのAIレビューを依頼…") {
-                    reviewSelection = ReviewSelection(signals: selectedVisiblePRs.compactMap { $0.signals.first }, account: model.state.account ?? "")
-                }.disabled(selectedVisiblePRs.isEmpty || model.demo || !model.ready)
-                    .help("Codex・Claudeを選び、投稿内容を確認する")
-            }.font(.system(size: 12)).controlSize(.small).padding(.horizontal, 8).padding(.top, 4)
-            HStack(spacing: 8) {
-                Toggle("表示中のPRを選択", isOn: Binding(
-                    get: { !selectablePRs.isEmpty && selectedVisiblePRs.count == selectablePRs.count },
-                    set: { checked in
-                        let keys = Set(selectablePRs.map(\.id))
-                        if checked { selectedPRs.formUnion(keys) } else { selectedPRs.subtract(keys) }
-                        copyMessage = ""
-                    }
-                )).toggleStyle(.checkbox).disabled(selectablePRs.isEmpty)
-                Spacer()
-                if !copyMessage.isEmpty { Text(copyMessage).foregroundStyle(.secondary) }
-                Button("URLをコピー（\(selectedVisiblePRs.count)件）") {
-                    let urls = selectedVisiblePRs.compactMap { group -> String? in
-                        guard let signal = group.signals.first,
-                              let path = PullRequestInfo.apiPath(for: signal) else { return nil }
-                        let parts = path.split(separator: "/")
-                        return "https://github.com/\(parts[1])/\(parts[2])/pull/\(parts[4])"
-                    }
-                    guard !urls.isEmpty else { return }
-                    NSPasteboard.general.clearContents()
-                    copyMessage = NSPasteboard.general.setString(urls.joined(separator: "\n"), forType: .string)
-                        ? "コピー済み" : "コピー失敗"
-                }.disabled(selectedVisiblePRs.isEmpty).help("表示中で選択したPRのURLを改行区切りでコピー")
-            }.font(.system(size: 12)).controlSize(.small).padding(.horizontal, 8).padding(.vertical, 4)
+            VStack(spacing: 0) {
+                if !selectablePRs.isEmpty {
+                    HStack {
+                        Toggle("表示中のPRを選択", isOn: Binding(
+                            get: { selectedVisiblePRs.count == selectablePRs.count },
+                            set: { checked in
+                                let keys = Set(selectablePRs.map(\.id))
+                                if checked { selectedPRs.formUnion(keys) } else { selectedPRs.subtract(keys) }
+                                copyMessage = ""
+                            }
+                        )).toggleStyle(.checkbox)
+                        Spacer()
+                        if !copyMessage.isEmpty { Text(copyMessage).foregroundStyle(.secondary) }
+                        if !selectedVisiblePRs.isEmpty {
+                            Button("URLをコピー（\(selectedVisiblePRs.count)件）") {
+                                let urls = selectedVisiblePRs.compactMap { group -> String? in
+                                    guard let signal = group.signals.first,
+                                          let path = PullRequestInfo.apiPath(for: signal) else { return nil }
+                                    let parts = path.split(separator: "/")
+                                    return "https://github.com/\(parts[1])/\(parts[2])/pull/\(parts[4])"
+                                }
+                                guard !urls.isEmpty else { return }
+                                NSPasteboard.general.clearContents()
+                                copyMessage = NSPasteboard.general.setString(urls.joined(separator: "\n"), forType: .string)
+                                    ? "コピー済み" : "コピー失敗"
+                            }.disabled(selectedVisiblePRs.isEmpty).help("表示中で選択したPRのURLを改行区切りでコピー")
+                        }
+                    }.padding(.horizontal, 8).padding(.vertical, 4)
+                }
+            }.font(.system(size: 12)).controlSize(.small)
             .onChange(of: selectedPRs) { _ in copyMessage = "" }
             .onChange(of: groups.map(\.id)) { ids in
                 selectedPRs.formIntersection(Set(ids))
@@ -554,7 +566,7 @@ struct InboxView: View {
             Picker("未確認の通知を再通知", selection: Binding(get: { model.state.settings.reminderMinutes }, set: { value in model.updateSettings { $0.reminderMinutes = value } })) {
                 Text("なし").tag(0); Text("15分").tag(15); Text("30分").tag(30); Text("1時間").tag(60)
             }
-            Toggle("Botからの更新も通知する", isOn: Binding(get: { model.state.settings.includeBots }, set: { value in model.updateSettings { $0.includeBots = value } }))
+            Toggle("Botの投稿を表示・通知する", isOn: Binding(get: { model.state.settings.includeBots }, set: { value in model.updateSettings { $0.includeBots = value } }))
             Toggle("ログイン時に起動", isOn: Binding(get: { loginStartup.enabled }, set: { loginStartup.setEnabled($0) }))
                 .disabled(model.demo)
             if loginStartup.requiresApproval {

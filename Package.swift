@@ -8,6 +8,7 @@ let package = Package(
     targets: [
         .target(name: "NotificationCore"),
         .executableTarget(name: "GitHubSignal", dependencies: ["NotificationCore"]),
-        .testTarget(name: "NotificationCoreTests", dependencies: ["NotificationCore"])
+        .testTarget(name: "NotificationCoreTests", dependencies: ["NotificationCore"]),
+        .testTarget(name: "GitHubSignalTests", dependencies: ["GitHubSignal"])
     ]
 )

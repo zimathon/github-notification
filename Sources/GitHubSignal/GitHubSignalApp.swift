@@ -26,8 +26,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func showInbox() {
         if inboxWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
+            let window = InboxWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 360),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.undoAcknowledgement = { [model] in
+                guard model.ready, model.state.canUndoAcknowledgement else { return false }
+                model.undoAcknowledgement()
+                NotificationCenter.default.post(name: .didUndoSignalAcknowledgement, object: nil)
+                return true
+            }
             window.title = "GitHub Signal"
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: InboxView(model: model))
@@ -80,7 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 }
 
-extension Notification.Name { static let showSignalInbox = Notification.Name("showSignalInbox") }
+extension Notification.Name {
+    static let showSignalInbox = Notification.Name("showSignalInbox")
+    static let didUndoSignalAcknowledgement = Notification.Name("didUndoSignalAcknowledgement")
+}
 
 @main
 struct GitHubSignalApp: App {

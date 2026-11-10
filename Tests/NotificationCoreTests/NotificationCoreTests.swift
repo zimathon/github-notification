@@ -91,6 +91,28 @@ final class NotificationCoreTests: XCTestCase {
         XCTAssertTrue(settings.includes(repository: "other/repo"))
     }
 
+    func testBotFilterHidesEventsWithoutRemovingHistory() throws {
+        let human = signal("human")
+        var bot = signal("bot")
+        bot.actor = "reviewer[bot]"
+        var botOnly = signal("bot-only")
+        botOnly.actor = "reviewer[BOT]"
+        botOnly.url = "https://github.com/org/repo/pull/2"
+        var outside = signal("outside")
+        outside.repository = "other/repo"
+        var state = InboxState()
+        state.signals = [human, bot, botOnly, outside]
+        state.settings.organizations = ["org"]
+        XCTAssertEqual(state.signals.filter { state.settings.includes($0) }.map(\.id), ["human", "bot", "bot-only"])
+        state.settings.includeBots = false
+        XCTAssertEqual(state.signals.filter { state.settings.includes($0) }.map(\.id), ["human"])
+        let restored = try JSONDecoder().decode(InboxState.self, from: JSONEncoder().encode(state))
+        XCTAssertFalse(restored.settings.includeBots)
+        XCTAssertEqual(restored.signals, [human, bot, botOnly, outside])
+        state.settings.includeBots = true
+        XCTAssertEqual(state.signals.filter { state.settings.includes($0) }.map(\.id), ["human", "bot", "bot-only"])
+    }
+
     func testQueueIsDurableAndRetainsFailedThreadsEarliestBoundary() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
