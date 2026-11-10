@@ -17,7 +17,8 @@ public sealed class InboxEngine
     public DateTimeOffset NextSync { get; private set; } = DateTimeOffset.MinValue;
     public DateTimeOffset? LastSync { get; private set; }
     public event Action? Changed;
-    public IEnumerable<Signal> Included => State.Signals.Where(x => State.Settings.Includes(x.Repository));
+    public IEnumerable<Signal> Included => State.Signals.Where(x => State.Settings.Includes(x.Repository)
+        && (State.Settings.IncludeBots || !x.Actor.EndsWith("[bot]", StringComparison.OrdinalIgnoreCase)));
     public int PendingCount => Included.Where(x => !x.Acknowledged).Select(x => x.ThreadKey).Distinct().Count();
     public InboxEngine(StateStore store, IGitHubTransport transport)
     {
@@ -138,7 +139,7 @@ public sealed class InboxEngine
         }
     }
     public List<Signal> Due(DateTimeOffset now) => !Ready || !State.Enabled ? [] : Included.Where(x =>
-        x.NeedsNotification(now, State.Settings.ReminderMinutes) && (State.Settings.IncludeBots || !x.Actor.EndsWith("[bot]", StringComparison.OrdinalIgnoreCase))).ToList();
+        x.NeedsNotification(now, State.Settings.ReminderMinutes)).ToList();
     public void MarkNotified(IEnumerable<Signal> signals, DateTimeOffset now)
     {
         if (!Ready) return;

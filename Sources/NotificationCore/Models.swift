@@ -107,6 +107,10 @@ public struct Settings: Codable {
         return organizations.contains { $0.caseInsensitiveCompare(owner) == .orderedSame }
     }
 
+    public func includes(_ signal: Signal) -> Bool {
+        includes(repository: signal.repository) && (includeBots || !signal.actor.lowercased().hasSuffix("[bot]"))
+    }
+
     public static func parseOrganizations(_ input: String) throws -> [String] {
         let names = input.components(separatedBy: CharacterSet(charactersIn: ",、 \n\t"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }

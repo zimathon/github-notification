@@ -50,8 +50,8 @@ public partial class MainWindow : Window
     public event Action? TestNotificationRequested;
     public event Func<string, bool>? UpdateNotificationRequested;
     public int VisibleThreadCount => ThreadList.Items.Count;
-    private string[] VisibleMergedThreadKeys => ThreadList.Items.Cast<ThreadRow>()
-        .Where(x => x.PullRequest?.Status == "merged" && x.HasPending).Select(x => x.Key).ToArray();
+    private string[] VisibleFinishedThreadKeys => ThreadList.Items.Cast<ThreadRow>()
+        .Where(x => (x.PullRequest?.Status is "merged" or "closed") && x.HasPending).Select(x => x.Key).ToArray();
     public MainWindow(InboxEngine engine, bool demo, CancellationToken lifetime)
     {
         this.engine = engine; this.demo = demo; this.lifetime = lifetime;
@@ -120,6 +120,9 @@ public partial class MainWindow : Window
     private void RenderThreads()
     {
         if (refreshing || !IsInitialized) return;
+        ClearPersonButton.Visibility = PersonFilter.Text.Length > 0
+            && !(PersonFilter.SelectedItem is FilterOption person && person.Value == "" && PersonFilter.Text == person.Label)
+            ? Visibility.Visible : Visibility.Collapsed;
         var owner = (string?)OwnerFilter.SelectedValue ?? "";
         var kind = (string?)KindFilter.SelectedValue ?? "";
         var authorFilter = (string?)AuthorFilter.SelectedValue ?? "all";
@@ -138,18 +141,21 @@ public partial class MainWindow : Window
         ThreadList.ItemsSource = rows;
         UpdateSelection();
         ShowAcknowledged.IsEnabled = StarredOnly.IsChecked != true;
-        UndoButton.IsEnabled = engine.Ready && engine.State.CanUndoAcknowledgement;
-        AcknowledgeAllButton.IsEnabled = engine.Ready && rows.Any(x => x.HasPending);
-        ClearMergedButton.IsEnabled = engine.Ready && VisibleMergedThreadKeys.Length > 0;
+        UndoItem.IsEnabled = engine.Ready && engine.State.CanUndoAcknowledgement;
+        AcknowledgeAllItem.IsEnabled = engine.Ready && rows.Any(x => x.HasPending);
+        ClearFinishedItem.IsEnabled = engine.Ready && VisibleFinishedThreadKeys.Length > 0;
         EmptyLabel.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     private ThreadRow[] VisiblePRs => ThreadList.Items.Cast<ThreadRow>().Where(x => PullRequestInfo.ApiPath(x.Latest) != null).ToArray();
     private void UpdateSelection()
     {
         var count = VisiblePRs.Count(x => selectedPRs.Contains(x.Key));
+        SelectionBar.Visibility = VisiblePRs.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        CopySelectedButton.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
         CopySelectedButton.Content = $"URLをコピー（{count}件）";
         CopySelectedButton.IsEnabled = count > 0;
-        ReviewSelectedButton.IsEnabled = count > 0 && engine.Ready && !demo;
+        ReviewSelectedItem.Header = $"AIレビューを依頼（{count}件）…";
+        ReviewSelectedItem.IsEnabled = count > 0 && engine.Ready && !demo;
         SelectAllPRs.IsEnabled = VisiblePRs.Length > 0;
         SelectAllPRs.IsChecked = VisiblePRs.Length > 0 && count == VisiblePRs.Length;
     }
@@ -215,6 +221,15 @@ public partial class MainWindow : Window
         else RenderThreads();
     }
     private void Search_Changed(object sender, TextChangedEventArgs e) => RenderThreads();
+    private void ClearPerson_Click(object sender, RoutedEventArgs e)
+    {
+        refreshing = true;
+        PersonFilter.SelectedItem = null;
+        PersonFilter.Text = "";
+        refreshing = false;
+        RenderThreads();
+        PersonFilter.Focus();
+    }
     private async void Toggle_Click(object sender, RoutedEventArgs e)
     {
         if (engine.State.Enabled) engine.Pause();
@@ -237,12 +252,14 @@ public partial class MainWindow : Window
     private void Acknowledge_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => x.AcknowledgeThread((string)((Button)sender).Tag));
     private void AcknowledgeAll_Click(object sender, RoutedEventArgs e)
     {
+        StarredOnly.Focus();
         var keys = ThreadList.Items.Cast<ThreadRow>().Select(x => x.Key).ToArray();
         engine.Mutate(x => x.AcknowledgeThreads(keys));
     }
-    private void ClearMerged_Click(object sender, RoutedEventArgs e)
+    private void ClearFinished_Click(object sender, RoutedEventArgs e)
     {
-        var keys = VisibleMergedThreadKeys;
+        StarredOnly.Focus();
+        var keys = VisibleFinishedThreadKeys;
         engine.Mutate(x => x.AcknowledgeThreads(keys));
     }
     private void Snooze_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => {
@@ -285,7 +302,7 @@ public partial class MainWindow : Window
             var release = await AppRelease.FetchAsync(http, lifetime);
             if (lifetime.IsCancellationRequested) return;
             if (release.IsNewer(Version)) {
-                UpdateButton.Content = $"{release.TagName} をダウンロード"; UpdateBanner.Visibility = Visibility.Visible;
+                UpdateVersionLabel.Text = $"{release.TagName} をダウンロードできます"; UpdateBanner.Visibility = Visibility.Visible;
                 if (engine.Ready && release.ShouldNotify(Version, engine.State.LastNotifiedRelease) && UpdateNotificationRequested?.Invoke(release.TagName) == true)
                     engine.Mutate(x => x.LastNotifiedRelease = release.TagName);
             } else { UpdateBanner.Visibility = Visibility.Collapsed; }
@@ -325,21 +342,30 @@ public partial class MainWindow : Window
         engine.Mutate(x => x.PullRequests[x.Signals[0].ThreadKey] = new("open", DateTimeOffset.UtcNow, "someone-else"));
         if (VisibleThreadCount != 1) throw new InvalidOperationException("Other PR metadata refresh failed");
         AuthorFilter.SelectedValue = "all";
+        if (CopySelectedButton.Visibility != Visibility.Collapsed || CopySelectedButton.IsEnabled || ReviewSelectedItem.IsEnabled) throw new InvalidOperationException("Selection actions must be disabled without a selection");
+        SelectAllPRs.IsChecked = true;
+        SelectAllPRs.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        if (CopySelectedButton.Visibility != Visibility.Visible || !CopySelectedButton.IsEnabled || !Equals(CopySelectedButton.Content, "URLをコピー（1件）")) throw new InvalidOperationException("Selecting PRs must enable their menu actions with a count");
+        SelectAllPRs.IsChecked = false;
+        SelectAllPRs.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        if (CopySelectedButton.Visibility != Visibility.Collapsed || CopySelectedButton.IsEnabled || ReviewSelectedItem.IsEnabled) throw new InvalidOperationException("Clearing selection must disable its menu actions");
         CheckEditableFiltersSmoke();
         SearchBox.Text = "nothing-matches";
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Search filter failed");
         SearchBox.Text = "";
-        CheckClearMergedSmoke();
-        AcknowledgeAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        CheckClearFinishedSmoke();
+        SearchBox.Focus();
+        AcknowledgeAllItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (!StarredOnly.IsKeyboardFocusWithin) throw new InvalidOperationException("Bulk acknowledgement must leave text editing before Ctrl+Z");
         if (VisibleThreadCount != 0 || engine.PendingCount != 0) throw new InvalidOperationException("PR acknowledgement failed");
-        UndoButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        if (VisibleThreadCount != 1 || engine.PendingCount == 0 || UndoButton.IsEnabled)
+        UndoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (VisibleThreadCount != 1 || engine.PendingCount == 0 || UndoItem.IsEnabled)
             throw new InvalidOperationException("PR acknowledgement undo failed");
         UpdateLayout();
         var star = Descendants(this).OfType<Button>().First(x => Equals(x.Content, "☆"));
         star.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         StarredOnly.IsChecked = true; StarredOnly.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
-        AcknowledgeAllButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        AcknowledgeAllItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         if (VisibleThreadCount != 1 || engine.PendingCount != 0) throw new InvalidOperationException("Starred acknowledged PR was hidden");
         UpdateLayout();
         Descendants(this).OfType<Button>().First(x => Equals(x.Content, "★")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -359,8 +385,15 @@ public partial class MainWindow : Window
         engine.Mutate(x => x.PullRequests[original.ThreadKey] = new("open", DateTimeOffset.UtcNow, "someone-else"));
         if (VisibleThreadCount != 1 || PersonFilter.Text != "@SOMEONE" || RepositoryFilter.Text != "EXAMP")
             throw new InvalidOperationException("Refresh discarded typed filter text");
-        PersonFilter.Text = "";
-        if (VisibleThreadCount != 2) throw new InvalidOperationException("Person keyword clear failed");
+        if (ClearPersonButton.Visibility != Visibility.Visible) throw new InvalidOperationException("Person clear button is hidden while typing");
+        ClearPersonButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 2 || PersonFilter.Text != "" || PersonFilter.SelectedItem != null || RepositoryFilter.Text != "EXAMP" || ClearPersonButton.Visibility != Visibility.Collapsed)
+            throw new InvalidOperationException("Person clear button must clear only the person keyword");
+        PersonFilter.SelectedValue = "someone-else";
+        if (VisibleThreadCount != 1 || ClearPersonButton.Visibility != Visibility.Visible) throw new InvalidOperationException("Person candidate selection failed");
+        ClearPersonButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (VisibleThreadCount != 2 || PersonFilter.Text != "" || PersonFilter.SelectedItem != null || RepositoryFilter.Text != "EXAMP")
+            throw new InvalidOperationException("Person clear button must clear only the selected person");
         RepositoryFilter.SelectedValue = original.Repository;
         if (VisibleThreadCount != 1) throw new InvalidOperationException("Repository candidate selection must be exact");
         RepositoryFilter.Text = "";
@@ -379,31 +412,40 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Organization change must restore the all-repositories choice");
         OwnerFilter.SelectedValue = "";
     }
-    private void CheckClearMergedSmoke()
+    private void CheckClearFinishedSmoke()
     {
         var original = engine.State.Signals[0];
         var open = original with { Id = "open-clear-smoke", Url = "https://github.com/octo-org/example/pull/2" };
         var hidden = original with { Id = "hidden-clear-smoke", Url = "https://github.com/octo-org/example/pull/3", Title = "対象外" };
+        var closed = original with { Id = "closed-clear-smoke", Url = "https://github.com/octo-org/example/pull/4" };
+        var draft = original with { Id = "draft-clear-smoke", Url = "https://github.com/octo-org/example/pull/5" };
+        var unknown = original with { Id = "unknown-clear-smoke", Url = "https://github.com/octo-org/example/pull/6" };
         engine.Mutate(x => {
-            x.Signals.Add(open); x.Signals.Add(hidden);
+            x.Signals.AddRange([open, hidden, closed, draft, unknown]);
             x.PullRequests[original.ThreadKey] = new("merged", DateTimeOffset.UtcNow);
             x.PullRequests[open.ThreadKey] = new("open", DateTimeOffset.UtcNow);
-            x.PullRequests[hidden.ThreadKey] = new("merged", DateTimeOffset.UtcNow);
+            x.PullRequests[hidden.ThreadKey] = new("closed", DateTimeOffset.UtcNow);
+            x.PullRequests[closed.ThreadKey] = new("closed", DateTimeOffset.UtcNow);
+            x.PullRequests[draft.ThreadKey] = new("draft", DateTimeOffset.UtcNow);
         });
         SearchBox.Text = original.Title;
-        if (VisibleThreadCount != 2 || !ClearMergedButton.IsEnabled) throw new InvalidOperationException("Merged clear selection failed");
-        ClearMergedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        if (VisibleThreadCount != 1 || engine.PendingCount != 2 || open.Acknowledged || hidden.Acknowledged || ClearMergedButton.IsEnabled)
-            throw new InvalidOperationException("Merged clear must preserve open and filtered-out PRs");
-        UndoButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        if (VisibleThreadCount != 2 || engine.PendingCount != 3) throw new InvalidOperationException("Merged clear undo failed");
+        if (VisibleThreadCount != 5 || !ClearFinishedItem.IsEnabled) throw new InvalidOperationException("Finished PR clear selection failed");
+        SearchBox.Focus();
+        ClearFinishedItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (!StarredOnly.IsKeyboardFocusWithin) throw new InvalidOperationException("Finished PR clear must leave text editing before Ctrl+Z");
+        if (VisibleThreadCount != 3 || engine.PendingCount != 4 || !original.Acknowledged || !closed.Acknowledged
+            || open.Acknowledged || hidden.Acknowledged || draft.Acknowledged || unknown.Acknowledged || ClearFinishedItem.IsEnabled)
+            throw new InvalidOperationException("Finished PR clear must preserve open, draft, unknown and filtered-out PRs");
+        UndoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (VisibleThreadCount != 5 || engine.PendingCount != 6) throw new InvalidOperationException("Finished PR clear undo failed");
         engine.Mutate(x => {
-            x.Signals.Remove(open); x.Signals.Remove(hidden);
-            x.PullRequests.Remove(open.ThreadKey); x.PullRequests.Remove(hidden.ThreadKey);
+            foreach (var signal in new[] { open, hidden, closed, draft, unknown }) {
+                x.Signals.Remove(signal); x.PullRequests.Remove(signal.ThreadKey);
+            }
             x.PullRequests[original.ThreadKey] = new("open", DateTimeOffset.UtcNow);
         });
         SearchBox.Text = "";
-        if (ClearMergedButton.IsEnabled) throw new InvalidOperationException("Merged clear must be disabled without merged PRs");
+        if (ClearFinishedItem.IsEnabled) throw new InvalidOperationException("Finished PR clear must be disabled without merged or closed PRs");
     }
     private void CheckSettingsSmoke()
     {

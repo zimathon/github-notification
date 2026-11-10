@@ -27,7 +27,7 @@ final class AppModel: ObservableObject {
     private var pullRequestAttempts: [String: Date] = [:]
     private var serverPollInterval: TimeInterval = 60
 
-    var filteredSignals: [Signal] { state.signals.filter { state.settings.includes(repository: $0.repository) } }
+    var filteredSignals: [Signal] { state.signals.filter { state.settings.includes($0) } }
     var pending: [Signal] { filteredSignals.filter { !$0.acknowledged } }
     var pendingThreadCount: Int { Set(pending.map(\.threadKey)).count }
     var availableOrganizations: [String] {
@@ -324,11 +324,9 @@ final class AppModel: ObservableObject {
     private func deliverDue() async {
         guard ready, state.enabled, permissionGranted, !demo else { return }
         let now = Date()
-        let due = state.signals.filter {
+        let due = filteredSignals.filter {
             $0.needsNotification(at: now, reminderMinutes: state.settings.reminderMinutes)
             && state.settings.allows($0.kind)
-            && state.settings.includes(repository: $0.repository)
-            && (state.settings.includeBots || !$0.actor.hasSuffix("[bot]"))
         }
         guard !due.isEmpty else { return }
         do {
