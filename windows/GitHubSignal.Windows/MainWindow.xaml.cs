@@ -154,6 +154,8 @@ public partial class MainWindow : Window
         CopySelectedButton.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
         CopySelectedButton.Content = $"URLをコピー（{count}件）";
         CopySelectedButton.IsEnabled = count > 0;
+        AcknowledgeSelectedItem.Header = $"選択したPRを確認済みにする（{count}件）";
+        AcknowledgeSelectedItem.IsEnabled = count > 0 && engine.Ready;
         ReviewSelectedItem.Header = $"AIレビューを依頼（{count}件）…";
         ReviewSelectedItem.IsEnabled = count > 0 && engine.Ready && !demo;
         SelectAllPRs.IsEnabled = VisiblePRs.Length > 0;
@@ -250,6 +252,12 @@ public partial class MainWindow : Window
         }
     }
     private void Acknowledge_Click(object sender, RoutedEventArgs e) => engine.Mutate(x => x.AcknowledgeThread((string)((Button)sender).Tag));
+    private void AcknowledgeSelected_Click(object sender, RoutedEventArgs e)
+    {
+        StarredOnly.Focus();
+        var keys = VisiblePRs.Where(x => selectedPRs.Contains(x.Key)).Select(x => x.Key).ToArray();
+        engine.Mutate(x => x.AcknowledgeThreads(keys));
+    }
     private void AcknowledgeAll_Click(object sender, RoutedEventArgs e)
     {
         StarredOnly.Focus();
@@ -349,6 +357,7 @@ public partial class MainWindow : Window
         SelectAllPRs.IsChecked = false;
         SelectAllPRs.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
         if (CopySelectedButton.Visibility != Visibility.Collapsed || CopySelectedButton.IsEnabled || ReviewSelectedItem.IsEnabled) throw new InvalidOperationException("Clearing selection must disable its menu actions");
+        CheckAcknowledgeSelectedSmoke();
         CheckEditableFiltersSmoke();
         SearchBox.Text = "nothing-matches";
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Search filter failed");
@@ -370,6 +379,27 @@ public partial class MainWindow : Window
         UpdateLayout();
         Descendants(this).OfType<Button>().First(x => Equals(x.Content, "★")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         if (VisibleThreadCount != 0) throw new InvalidOperationException("Star removal filter failed");
+    }
+    private void CheckAcknowledgeSelectedSmoke()
+    {
+        var original = engine.State.Signals[0];
+        var other = original with { Id = "unselected-smoke", Url = "https://github.com/octo-org/example/pull/99" };
+        engine.Mutate(x => x.Signals.Add(other));
+        if (AcknowledgeSelectedItem.IsEnabled) throw new InvalidOperationException("Selected acknowledgement must be disabled without a selection");
+        UpdateLayout();
+        var check = Descendants(this).OfType<CheckBox>().First(x => Equals(x.Tag, original.ThreadKey));
+        check.IsChecked = true;
+        check.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        if (!AcknowledgeSelectedItem.IsEnabled || !Equals(AcknowledgeSelectedItem.Header, "選択したPRを確認済みにする（1件）"))
+            throw new InvalidOperationException("Selected acknowledgement must reflect the selection");
+        SearchBox.Focus();
+        AcknowledgeSelectedItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (!original.Acknowledged || other.Acknowledged || VisibleThreadCount != 1 || AcknowledgeSelectedItem.IsEnabled || !StarredOnly.IsKeyboardFocusWithin)
+            throw new InvalidOperationException("Selected acknowledgement must preserve unselected PRs and leave text editing");
+        UndoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        if (original.Acknowledged || other.Acknowledged || VisibleThreadCount != 2)
+            throw new InvalidOperationException("Selected acknowledgement must be undoable");
+        engine.Mutate(x => x.Signals.Remove(other));
     }
     private void CheckEditableFiltersSmoke()
     {
