@@ -33,6 +33,7 @@
       <DockPanel Margin="0,0,0,6">
         <Menu DockPanel.Dock="Right" Background="Transparent" VerticalAlignment="Center" Margin="5,0,0,0">
           <MenuItem Header="…" ToolTip="AIレビュー・一括確認・マージ／クローズ済みをクリア・元に戻す" AutomationProperties.Name="通知の操作">
+            <MenuItem x:Name="AcknowledgeSelectedItem" Header="選択したPRを確認済みにする（0件）" Click="AcknowledgeSelected_Click" IsEnabled="False"/>
             <MenuItem x:Name="ReviewSelectedItem" Header="AIレビューを依頼（0件）…" Click="ReviewSelected_Click" IsEnabled="False"/>
             <Separator/>
             <MenuItem x:Name="AcknowledgeAllItem" Header="一括確認" Click="AcknowledgeAll_Click" ToolTip="表示中のPR・Issueをすべて確認済みにする"/>

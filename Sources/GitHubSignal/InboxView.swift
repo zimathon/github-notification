@@ -260,6 +260,10 @@ struct InboxView: View {
                     .accessibilityLabel("スター付きだけ表示")
                 Toggle("確認済み", isOn: $showAcknowledged).toggleStyle(.checkbox).disabled(starredOnly)
                 Menu {
+                    Button("選択したPRを確認済みにする（\(selectedVisiblePRs.count)件）") {
+                        editingText = false
+                        model.acknowledgeThreads(Set(selectedVisiblePRs.map(\.id)))
+                    }.disabled(selectedVisiblePRs.isEmpty || !model.ready)
                     Button("AIレビューを依頼（\(selectedVisiblePRs.count)件）…") {
                         reviewSelection = ReviewSelection(signals: selectedVisiblePRs.compactMap { $0.signals.first }, account: model.state.account ?? "")
                     }.disabled(selectedVisiblePRs.isEmpty || model.demo || !model.ready)
